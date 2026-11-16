@@ -23,6 +23,7 @@ function freshState() {
       fit: "cover", end_hold_seconds: 0, transition: "none", transition_seconds: 0.25,
       transition_sfx: "core_sound_effect.wav", sfx_volume: 0.8,
       rank_active_color: "#FFD400", title_uppercase: true, loudnorm: true,
+      rank_font_size: 46, rank_spacing: 78, rank_stroke: 5,
     },
   };
 }
@@ -39,7 +40,7 @@ function load() {
     const s = JSON.parse(raw);
     if (!Array.isArray(s.clips) || !Array.isArray(s.title)) return null;
     // Older saves lack newer options; fill them in without adding a sound they didn't pick.
-    s.style = { ...freshState().style, transition_sfx: "", ...(s.style || {}) };
+    s.style = compactRanks({ ...freshState().style, transition_sfx: "", ...(s.style || {}) });
     return s;
   } catch { return null; }
 }
@@ -428,6 +429,10 @@ const opt = {
 };
 function renderStyle() {
   opt.fit.value = state.style.fit;
+  const rankSel = $("#optRankSize");
+  const size = String(state.style.rank_font_size);
+  if (![...rankSel.options].some((o) => o.value === size)) rankSel.add(new Option(`Custom (${size}px)`, size));
+  rankSel.value = size;
   opt.hold.value = String(state.style.end_hold_seconds);
   opt.tx.value = state.style.transition;
   opt.txDur.value = String(state.style.transition_seconds);
@@ -442,6 +447,7 @@ function renderStyle() {
   applyPreviewFit();
 }
 opt.fit.addEventListener("change", () => { state.style.fit = opt.fit.value; changed(); });
+$("#optRankSize").addEventListener("change", (e) => { setRankSize(+e.target.value); changed(); });
 opt.hold.addEventListener("change", () => { state.style.end_hold_seconds = +opt.hold.value; changed(); });
 opt.tx.addEventListener("change", () => { state.style.transition = opt.tx.value; changed(); playTransition({ audition: true }); });
 opt.txDur.addEventListener("change", () => { state.style.transition_seconds = +opt.txDur.value; changed(); playTransition({ audition: true }); });
@@ -893,8 +899,24 @@ function fromProject(p) {
       start: c.start != null ? fmtTime(c.start) : "", end: c.end != null ? fmtTime(c.end) : "", meta: null,
     })),
     playOrder: p.play_order,
-    style: { ...base.style, ...(p.style || {}), transition_sfx: p.style?.transition_sfx || "" },
+    style: compactRanks({ ...base.style, ...(p.style || {}), transition_sfx: p.style?.transition_sfx || "" }),
   };
+}
+
+/** Same rule as the server (models.Style): the old default 64px/110px list becomes the compact one. */
+function compactRanks(style) {
+  if (style.rank_font_size === 64 && style.rank_spacing === 110) {
+    style = { ...style, rank_font_size: 46, rank_spacing: 78 };
+    if (style.rank_stroke === 6) style.rank_stroke = 5;
+  }
+  return style;
+}
+
+/** Rank text size: row spacing and outline follow the text size. */
+function setRankSize(size) {
+  state.style.rank_font_size = size;
+  state.style.rank_spacing = Math.round(size * 1.7);
+  state.style.rank_stroke = size >= 52 ? 6 : 5;
 }
 async function refetchQuietly(c) {
   // Clips in the server cache come back instantly; others download.

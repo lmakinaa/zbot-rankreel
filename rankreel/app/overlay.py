@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageFont
 from .config import OVERLAY_DIR, resolve_path
 from .models import Project, Style, TitleToken
 
-OVERLAY_VERSION = 1  # bump to invalidate cached PNGs after layout changes
+OVERLAY_VERSION = 2  # bump to invalidate cached PNGs after layout changes
 TITLE_MARGIN_X = 50
 TITLE_ABS_MIN_SIZE = 32
 RANK_RIGHT_MARGIN = 40
@@ -140,19 +140,27 @@ def _draw_title(draw: ImageDraw.ImageDraw, project: Project, fpath: str) -> None
 
 
 # --------------------------------------------------------------------------- ranks
-def _fit_name(name: str, max_w: float, style: Style, fpath: str) -> tuple[str, ImageFont.FreeTypeFont]:
-    """Shrink the name's font to fit; at the minimum size, ellipsize."""
+def _name_font_size(names: list[str], max_w: float, style: Style, fpath: str) -> int:
+    """One size for every name: the largest (up to rank_font_size) at which all fit.
+
+    Uses all names, revealed or not, so the size doesn't jump as names appear.
+    """
     min_size = max(12, int(style.rank_font_size * RANK_NAME_MIN_RATIO))
     for size in range(style.rank_font_size, min_size - 1, -2):
         font = _font(fpath, size)
-        if font.getlength(name) <= max_w:
-            return name, font
-    font = _font(fpath, min_size)
+        if all(font.getlength(n) <= max_w for n in names):
+            return size
+    return min_size
+
+
+def _ellipsize(name: str, max_w: float, font: ImageFont.FreeTypeFont, fpath: str) -> str:
+    if font.getlength(name) <= max_w:
+        return name
     ell = _ellipsis(fpath)
     text = name
     while text and font.getlength(text.rstrip() + ell) > max_w:
         text = text[:-1]
-    return (text.rstrip() + ell) if text else ell, font
+    return (text.rstrip() + ell) if text else ell
 
 
 def _draw_ranks(draw: ImageDraw.ImageDraw, project: Project, step: int, fpath: str) -> None:
@@ -165,7 +173,9 @@ def _draw_ranks(draw: ImageDraw.ImageDraw, project: Project, step: int, fpath: s
     num_font = _font(fpath, style.rank_font_size)
     num_w = max(num_font.getlength(f"{r}.") for r in range(1, n + 1))
     name_x = style.rank_x + num_w + num_font.getlength(" ") * 0.8
-    max_name_w = style.width - name_x - RANK_RIGHT_MARGIN
+    max_name_w = min(style.width - name_x - RANK_RIGHT_MARGIN, style.rank_name_max_width)
+    all_names = [renderable(names.get(r, ""), fpath).strip() for r in range(1, n + 1)]
+    name_font = _font(fpath, _name_font_size([x for x in all_names if x], max_name_w, style, fpath))
     cap_h = -num_font.getbbox("H", anchor="ls")[1]
     for rank in range(1, n + 1):
         color = style.rank_active_color if rank == active else style.rank_color
@@ -173,10 +183,10 @@ def _draw_ranks(draw: ImageDraw.ImageDraw, project: Project, step: int, fpath: s
         kw = dict(anchor="ls", stroke_width=style.rank_stroke, stroke_fill=STROKE_FILL)
         draw.text((style.rank_x, baseline), f"{rank}.", font=num_font, fill=color, **kw)
         if rank in revealed:
-            name = renderable(names.get(rank, ""), fpath).strip()
+            name = all_names[rank - 1]
             if name:
-                text, font = _fit_name(name, max_name_w, style, fpath)
-                draw.text((name_x, baseline), text, font=font, fill=color, **kw)
+                text = _ellipsize(name, max_name_w, name_font, fpath)
+                draw.text((name_x, baseline), text, font=name_font, fill=color, **kw)
 
 
 # --------------------------------------------------------------------------- public

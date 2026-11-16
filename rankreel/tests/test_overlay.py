@@ -97,3 +97,43 @@ def test_snapshot_stable_and_cached(project_factory, tmp_path):
     h2 = hashlib.sha1(render_overlay(p, 2).tobytes()).hexdigest()
     assert h1 == h2  # deterministic render
     assert overlay_png(p, 3, tmp_path) != a
+
+
+# ---------------------------------------------------------------- compact rank list
+def _row_ink_right_edge(p, img, rank):
+    s = p.style
+    top = s.rank_top + (rank - 1) * s.rank_spacing
+    box = img.crop((0, top - 5, s.width, top + s.rank_font_size + 5)).getbbox()
+    return box[2] if box else 0
+
+
+def test_names_stay_within_the_max_width(project_factory):
+    names = ["Streamer jumpscared", "Bathroom meltdown", "Suit man evacuates", "Coffee spill", "X"]
+    p = project_factory(n=5, names=names)
+    img = render_overlay(p, 4)  # everything revealed
+    limit = p.style.rank_x + 140 + p.style.rank_name_max_width  # number column + name width
+    for rank in range(1, 6):
+        assert _row_ink_right_edge(p, img, rank) <= limit, rank
+
+
+def test_all_names_share_one_size_and_it_is_stable(project_factory):
+    from app.overlay import _name_font_size, font_path
+    p = project_factory(n=3, names=["Short", "A considerably longer clip name here", "Mid size"])
+    fp = font_path(p.style)
+    size = _name_font_size(["Short", "A considerably longer clip name here", "Mid size"],
+                           p.style.rank_name_max_width, p.style, fp)
+    assert size < p.style.rank_font_size  # shrunk for the long one, applied to all
+    # Same overlay for "Short" whether or not the long name is revealed yet.
+    early, late = render_overlay(p, 0), render_overlay(p, 2)
+    row = (p.style.rank_x + 60, p.style.rank_top + 2 * p.style.rank_spacing - 5,
+           p.style.width, p.style.rank_top + 2 * p.style.rank_spacing + p.style.rank_font_size + 5)
+    # rank 3 ("Mid size") is revealed in both (play order 3,2,1): same pixels except colour.
+    assert early.crop(row).getbbox() == late.crop(row).getbbox()
+
+
+def test_old_saved_rank_size_becomes_compact():
+    from app.models import Style
+    s = Style.model_validate({"rank_font_size": 64, "rank_spacing": 110, "rank_stroke": 6})
+    assert (s.rank_font_size, s.rank_spacing, s.rank_stroke) == (46, 78, 5)
+    custom = Style.model_validate({"rank_font_size": 64, "rank_spacing": 100})
+    assert custom.rank_font_size == 64  # a deliberate custom size is left alone

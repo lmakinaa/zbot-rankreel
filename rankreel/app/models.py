@@ -60,11 +60,12 @@ class Style(BaseModel):
     title_font_size_min: int = 56
     title_stroke: int = 8
     title_uppercase: bool = True
-    rank_font_size: int = 64
-    rank_stroke: int = 6
+    rank_font_size: int = 46
+    rank_stroke: int = 5
     rank_x: int = 40
     rank_top: int = 470
-    rank_spacing: int = 110
+    rank_spacing: int = 78
+    rank_name_max_width: int = 560  # px; longer names shrink (all together) so the list stays compact
     rank_color: str = "#FFFFFF"
     rank_active_color: str = "#FFD400"  # the rank currently playing
     # cover: fill the frame, but never cut off much of the picture: when a clip isn't
@@ -86,6 +87,17 @@ class Style(BaseModel):
     @classmethod
     def _colors(cls, v: str) -> str:
         return _check_hex(v)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _old_rank_defaults(cls, data):
+        # Projects saved before the compact rank list stored the old defaults (64px text,
+        # 110px rows), which the editor never offered to change: give them the new look.
+        if isinstance(data, dict) and data.get("rank_font_size") == 64 and data.get("rank_spacing") == 110:
+            data = {**data, "rank_font_size": 46, "rank_spacing": 78}
+            if data.get("rank_stroke") == 6:
+                data["rank_stroke"] = 5
+        return data
 
     @field_validator("transition_sfx", mode="before")
     @classmethod
