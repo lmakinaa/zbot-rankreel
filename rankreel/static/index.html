@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RankReel</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">▲</span> RankReel</div>
+  <div class="topbar-actions">
+    <select id="projectSelect" aria-label="Saved projects"><option value="">Load project…</option></select>
+    <button id="importBtn" class="btn ghost" title="Paste a project JSON (e.g. from Claude)">Import</button>
+    <button id="saveBtn" class="btn ghost">Save</button>
+    <button id="newBtn" class="btn ghost">New</button>
+  </div>
+</header>
+
+<main class="layout">
+  <div class="editor">
+
+    <!-- 1. Title -->
+    <section class="card">
+      <h2><span class="step">1</span> Title</h2>
+      <input id="titleInput" class="input big" placeholder="RANKING THE FUNNIEST MOMENTS 😭" autocomplete="off">
+      <p class="help">Click a word to cycle its color: white → yellow → red → green → custom.</p>
+      <div id="titleChips" class="chips"></div>
+      <input id="customColor" type="color" class="sr-only" tabindex="-1" aria-hidden="true">
+    </section>
+
+    <!-- 2. Clips -->
+    <section class="card">
+      <div class="card-head">
+        <h2><span class="step">2</span> Clips</h2>
+        <label class="count">Number of clips
+          <select id="clipCount" aria-label="Number of clips"></select>
+        </label>
+      </div>
+      <div id="clips" class="clips"></div>
+      <button id="addClip" class="btn ghost wide">+ Add clip</button>
+    </section>
+
+    <!-- 3. Playback order -->
+    <section class="card">
+      <div class="card-head">
+        <h2><span class="step">3</span> Playback order</h2>
+        <div class="presets">
+          <button class="btn small" data-preset="worst">Worst → best (#1 last)</button>
+          <button class="btn small" data-preset="suspense">Suspense</button>
+        </div>
+      </div>
+      <p class="help">Drag to reorder (or focus a chip and use ← →). Plays left to right.</p>
+      <div id="order" class="order"></div>
+    </section>
+
+    <!-- 5. Style -->
+    <section class="card">
+      <h2><span class="step">4</span> Style</h2>
+      <div class="grid-opts">
+        <label>Fit
+          <select id="optFit"><option value="cover">Cover (crop to fill)</option><option value="contain">Contain (black bars)</option></select>
+        </label>
+        <label>End hold
+          <select id="optHold"><option value="0">None</option><option value="0.3">0.3s freeze (cleaner loop)</option><option value="0.5">0.5s freeze</option></select>
+        </label>
+        <label>Transition (on each cut)
+          <select id="optTx">
+            <option value="none">None (hard cut)</option>
+            <option value="flash">Flash (white)</option>
+            <option value="zoom">Zoom punch</option>
+            <option value="punch">Flash + zoom</option>
+            <option value="fade">Dip to black</option>
+            <option value="slide">Slide in</option>
+            <option value="shake">Shake (vibrate)</option>
+          </select>
+        </label>
+        <label>Transition speed
+          <select id="optTxDur">
+            <option value="0.15">Fast (0.15s)</option>
+            <option value="0.25">Normal (0.25s)</option>
+            <option value="0.4">Slow (0.4s)</option>
+          </select>
+        </label>
+        <div class="field">
+          <label for="optSfx">Transition sound (on each cut)</label>
+          <select id="optSfx"><option value="">None</option></select>
+          <div class="sfx-actions">
+            <button id="sfxUpload" class="btn small" type="button">⬆ Upload sound…</button>
+            <button id="sfxDelete" class="btn small ghost" type="button" hidden>Delete</button>
+            <input id="sfxFile" type="file" class="sr-only" tabindex="-1"
+                   accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac">
+          </div>
+          <div id="sfxMsg" class="small muted"></div>
+        </div>
+        <label>Sound volume
+          <select id="optSfxVol">
+            <option value="0.4">Low</option>
+            <option value="0.8">Medium</option>
+            <option value="1.2">High</option>
+          </select>
+        </label>
+        <label>Active rank color
+          <input id="optActive" type="color" value="#FFD400">
+        </label>
+        <label class="check"><input id="optUpper" type="checkbox" checked> Uppercase title</label>
+        <label class="check"><input id="optLoud" type="checkbox" checked> Normalize loudness</label>
+      </div>
+    </section>
+  </div>
+
+  <aside class="side">
+    <section class="card sticky">
+      <div class="phone" id="phone">
+        <video id="pv" playsinline preload="auto"></video>
+        <div id="pvFx" class="pv-fx"></div>
+        <img id="pvOverlay" alt="">
+        <div id="pvEmpty" class="pv-empty">Fetch clips to preview</div>
+      </div>
+      <div class="pv-controls">
+        <button id="playAll" class="btn">▶ Play preview</button>
+        <div id="stepBtns" class="steps" role="group" aria-label="Preview step"></div>
+      </div>
+
+      <!-- Duration bar -->
+      <div class="duration">
+        <div class="dur-head">
+          <span>Total</span>
+          <strong id="durTotal">0.0s</strong>
+        </div>
+        <div class="dur-track" id="durTrack">
+          <div class="dur-sweet" title="Sweet spot 27–35s"></div>
+          <div class="dur-limit" title="40s"></div>
+          <div class="dur-fill" id="durFill"></div>
+        </div>
+        <div class="dur-scale"><span>0</span><span>20</span><span>27–35</span><span>40s</span></div>
+        <div id="durMsg" class="dur-msg"></div>
+      </div>
+      <ul id="messages" class="messages"></ul>
+
+      <!-- Render -->
+      <button id="renderBtn" class="btn primary wide">Render video</button>
+      <div id="renderBox" class="render-box" hidden>
+        <div class="progress"><div id="progFill"></div></div>
+        <div id="progMsg" class="muted small"></div>
+      </div>
+      <div id="resultBox" class="result" hidden>
+        <video id="resultVideo" controls playsinline></video>
+        <a id="downloadLink" class="btn primary wide" download>Download MP4</a>
+        <label class="small muted" for="creditsText">Credits (paste into the description)</label>
+        <textarea id="creditsText" readonly rows="4"></textarea>
+        <button id="copyCredits" class="btn ghost wide">Copy credits</button>
+      </div>
+    </section>
+  </aside>
+</main>
+
+<dialog id="importDlg" class="dialog" aria-labelledby="importTitle">
+  <form method="dialog" class="dialog-body" id="importForm">
+    <h2 id="importTitle">Import project</h2>
+    <p class="help">Paste the project JSON (for example from the clip-picker skill in Claude), or choose a <code>.json</code> file. It replaces what's in the editor now.</p>
+    <textarea id="importText" rows="14" spellcheck="false" placeholder='{ "title": [...], "clips": [...], "play_order": [...] }'></textarea>
+    <div class="dialog-row">
+      <button type="button" id="importFileBtn" class="btn small">Choose .json file…</button>
+      <input type="file" id="importFile" accept=".json,application/json" class="sr-only" tabindex="-1">
+      <label class="check small"><input type="checkbox" id="importSave" checked> Also save it to my projects</label>
+    </div>
+    <div id="importMsg" class="import-msg" role="alert"></div>
+    <div class="dialog-actions">
+      <button type="button" id="importCancel" class="btn ghost">Cancel</button>
+      <button type="submit" id="importGo" class="btn primary">Import</button>
+    </div>
+  </form>
+</dialog>
+
+<template id="clipTpl">
+  <div class="clip">
+    <div class="clip-head">
+      <select class="rank" aria-label="Rank"></select>
+      <input class="input name" placeholder="Rank name, e.g. Dog vs vacuum" autocomplete="off">
+      <button class="icon remove" title="Remove clip" aria-label="Remove clip">✕</button>
+    </div>
+    <div class="url-row">
+      <input class="input url" placeholder="https://www.tiktok.com/@user/video/…" autocomplete="off" spellcheck="false">
+      <button class="btn fetch">Fetch</button>
+    </div>
+    <div class="clip-body">
+      <div class="thumb" hidden><video class="cv" playsinline preload="metadata" controls></video></div>
+      <div class="trim">
+        <div class="trim-row">
+          <label>Start <input class="input ts start" placeholder="0:00"></label>
+          <label>End <input class="input ts end" placeholder="end"></label>
+          <span class="len muted"></span>
+        </div>
+        <div class="trim-btns" hidden>
+          <button class="btn small set-start">Start = now</button>
+          <button class="btn small set-end">End = now</button>
+          <button class="btn small play-trim">▶ Trim</button>
+        </div>
+        <div class="meta muted small"></div>
+        <div class="status small"></div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

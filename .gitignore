@@ -1,0 +1,27 @@
+# Build outputs (regenerate with the skill-creator packager)
+*.skill
+*.zip
+
+# Local copies / backups, not source
+rankreel_backup/
+/rankreel-clip-picker/
+
+# Python / OS noise
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# Claude Code per-machine settings
+.claude/settings.local.json
+
+# RankReel's own ignores (venv, cache, output, projects, config.json, cookies.txt)
+# live in rankreel/.gitignore
+
+# Sounds uploaded in the app may be third-party licensed (e.g. Mixkit): keep them local.
+# Only the built-in, original vibration sounds are committed.
+rankreel/assets/sfx/*
+!rankreel/assets/sfx/README.txt
+!rankreel/assets/sfx/vibrate.wav
+!rankreel/assets/sfx/vibrate_double.wav
+!rankreel/assets/sfx/vibrate_heavy.wav

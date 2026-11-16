@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+yt-dlp
+pillow
+pydantic
+fonttools
+pytest
+httpx
+# Optional: ships ffmpeg/ffprobe binaries if you can't install ffmpeg system-wide.
+# static-ffmpeg

@@ -1,0 +1,12 @@
+{
+  "title": "RANKING THE {#FFD400:FUNNIEST} PET {#FF3B30:MOMENTS} 😭",
+  "clips": [
+    {"url": "https://www.tiktok.com/@creator1/video/1111111111111111111", "start": "0:01.5", "end": "0:07",   "rank": 1, "name": "Dog vs vacuum"},
+    {"url": "https://www.tiktok.com/@creator2/video/2222222222222222222", "start": "3",      "end": "9",      "rank": 2, "name": "Cat steals pizza"},
+    {"url": "https://www.tiktok.com/@creator3/video/3333333333333333333", "start": "0:00",   "end": "0:05.5", "rank": 3, "name": "Goat scream"},
+    {"url": "https://www.tiktok.com/@creator4/video/4444444444444444444", "start": "2",      "end": "8",      "rank": 4, "name": "Parrot sings"},
+    {"url": "https://www.tiktok.com/@creator5/video/5555555555555555555", "start": "0:10",   "end": "0:15",   "rank": 5, "name": "Hamster escape"}
+  ],
+  "play_order": [4, 2, 5, 3, 1],
+  "style": {"fit": "cover", "end_hold_seconds": 0.3, "transition_sfx": null}
+}
