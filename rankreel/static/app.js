@@ -21,7 +21,7 @@ function freshState() {
     playOrder: [5, 4, 3, 2, 1],
     style: {
       fit: "cover", end_hold_seconds: 0, transition: "none", transition_seconds: 0.25,
-      transition_sfx: "vibrate.wav", sfx_volume: 0.8,
+      transition_sfx: "core_sound_effect.mp3", sfx_volume: 0.8,
       rank_active_color: "#FFD400", title_uppercase: true, loudnorm: true,
     },
   };
@@ -30,6 +30,7 @@ function freshState() {
 let state = load() || freshState();
 let validation = null;
 let previewStep = -1;
+const clipFetches = new WeakMap();
 
 function load() {
   try {
@@ -63,9 +64,11 @@ function parseTime(v) {
   return +a * 3600 + +b * 60 + secF;
 }
 function fmtTime(t) {
-  if (t === null || t === undefined || isNaN(t)) return "";
-  const m = Math.floor(t / 60);
-  const s = (t - m * 60).toFixed(1).padStart(4, "0");
+  if (t === null || t === undefined || !Number.isFinite(Number(t))) return "";
+  // Round first so 59.99s carries into the next minute instead of becoming 0:60.0.
+  const tenths = Math.round(Number(t) * 10);
+  const m = Math.floor(tenths / 600);
+  const s = ((tenths % 600) / 10).toFixed(1).padStart(4, "0");
   return `${m}:${s}`;
 }
 const isUrl = (u) => /^https?:\/\/\S+$/i.test((u || "").trim());
@@ -210,7 +213,10 @@ function buildClip(c) {
   const urlIn = $(".url", el);
   urlIn.addEventListener("input", (e) => {
     const clip = get();
-    if (clip.url.trim() !== e.target.value.trim()) { clip.meta = null; clip.error = null; }
+    if (clip.url.trim() !== e.target.value.trim()) {
+      clip.meta = null; clip.error = null; clip.loading = false;
+      clipFetches.delete(clip); // an older download must not update this row
+    }
     clip.url = e.target.value;
     changed({ clips: false });
     updateClip(el, clip);
@@ -271,19 +277,30 @@ function updateClip(el, c) {
 async function fetchClip(c, el) {
   if (!c || c.loading) return;
   if (!isUrl(c.url)) { c.error = "Paste a full TikTok link (https://…)."; updateClip(el, c); return; }
+  const url = c.url.trim();
+  const request = Symbol();
+  clipFetches.set(c, request);
+  const isCurrent = () => clipFetches.get(c) === request && c.url.trim() === url && state.clips.includes(c);
   c.loading = true; c.error = null;
   updateClip(el, c);
   try {
-    const res = await api("/api/clips/fetch", { url: c.url.trim() });
+    const res = await api("/api/clips/fetch", { url });
     const j = await res.json();
-    c.meta = { duration: j.duration, creator: j.creator, preview_url: j.preview_url, has_audio: j.has_audio };
+    if (isCurrent()) {
+      c.meta = { duration: j.duration, creator: j.creator, preview_url: j.preview_url, has_audio: j.has_audio };
+    }
   } catch (e) {
-    c.meta = null;
-    c.error = e.message;
+    if (isCurrent()) {
+      c.meta = null;
+      c.error = e.message;
+    }
   } finally {
-    c.loading = false;
+    if (clipFetches.get(c) === request) {
+      clipFetches.delete(c);
+      c.loading = false;
+      if (state.clips.includes(c)) changed();
+    }
   }
-  changed();
 }
 
 function playTrim(c, video) {
@@ -815,10 +832,9 @@ function fromProject(p) {
       start: c.start != null ? fmtTime(c.start) : "", end: c.end != null ? fmtTime(c.end) : "", meta: null,
     })),
     playOrder: p.play_order,
-    style: { ...base.style, ...pick(p.style || {}, Object.keys(base.style)), transition_sfx: p.style?.transition_sfx || "" },
+    style: { ...base.style, ...(p.style || {}), transition_sfx: p.style?.transition_sfx || "" },
   };
 }
-const pick = (o, keys) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
 async function refetchQuietly(c) {
   // Clips in the server cache come back instantly; others download.
   const el = [...clipsBox.children].find((x) => x.dataset.id === c.id);

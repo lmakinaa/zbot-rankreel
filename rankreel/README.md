@@ -74,7 +74,7 @@ Project JSON (see [examples/example_project.json](examples/example_project.json)
 
 - **Emoji** aren't in the overlay font, so they're dropped from the burned-in title. Keep them in your YouTube title.
 - **HEVC clips.** TikTok often serves H.265. The original is kept for rendering, and a small H.264 copy (`*.preview.mp4`) is made only for the in-browser preview.
-- **Transition sounds.** Three vibration sounds are built in: *Vibrate*, *Vibrate double* and *Vibrate heavy*. They're synthesized by RankReel (original, royalty-free) in `assets/sfx/` and recreated on startup if deleted (`python cli.py make-sfx --force` regenerates them). New projects default to *Vibrate*. The sound plays on each cut, starting at the same moment as the visual transition (pair it with **Shake**), not on the opening clip. Picking a sound in the UI plays it, and **Sound volume** sets Low/Medium/High. **Your own sounds:** click **⬆ Upload sound…** under the sound list. Accepted: `.mp3 .wav .m4a .aac .ogg .flac`, up to 10 MB and 10s. Each file is checked to be real audio, saved to `assets/sfx/`, listed under *Your sounds*, selected, and played once. **Delete** removes a custom sound (built-ins can't be deleted). You can also drop files straight into `assets/sfx/`.
+- **Transition sounds.** Three vibration sounds are built in: *Vibrate*, *Vibrate double* and *Vibrate heavy*. They're synthesized by RankReel (original, royalty-free) in `assets/sfx/` and recreated on startup if deleted (`python cli.py make-sfx --force` regenerates them). New projects default to *Core sound effect* (`assets/sfx/core_sound_effect.mp3`). The sound plays on each cut, starting at the same moment as the visual transition (pair it with **Shake**), not on the opening clip. Picking a sound in the UI plays it, and **Sound volume** sets Low/Medium/High. **Your own sounds:** click **⬆ Upload sound…** under the sound list. Accepted: `.mp3 .wav .m4a .aac .ogg .flac`, up to 10 MB and 10s. Each file is checked to be real audio, saved to `assets/sfx/`, listed under *Your sounds*, selected, and played once. **Delete** removes a custom sound (built-ins can't be deleted). You can also drop files straight into `assets/sfx/`.
 - **Links that need login.** Export a Netscape `cookies.txt` from your browser and set `RANKREEL_COOKIES=/path/cookies.txt`, or put `{"cookies_file": "cookies.txt"}` in `config.json`.
 - **Errors.** Private, removed and photo/slideshow posts, and rate limits, each show a plain message on the clip row.
 - **Font.** Montserrat Black (SIL OFL, `assets/fonts/OFL.txt`). Change `style.font_path` to use another TTF/OTF.
@@ -92,5 +92,7 @@ pytest                       # ~30s; compose tests run real ffmpeg encodes
 pytest -m "not slow"         # quick
 RANKREEL_NETWORK_TESTS=1 pytest -k real_tiktok   # one real download
 ```
+
+Editor regression tests also run through pytest when Node.js is installed; no npm packages are needed.
 
 Layout: `app/models.py` (data model and title markup), `timeparse.py`, `validate.py`, `overlay.py` (Pillow), `compose.py` (ffmpeg), `downloader.py` (yt-dlp and cache), `render_job.py` (pipeline and background jobs), `main.py` (FastAPI), `static/` (UI), `cli.py`.

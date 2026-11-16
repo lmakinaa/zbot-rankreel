@@ -18,10 +18,11 @@ __pycache__/
 # RankReel's own ignores (venv, cache, output, projects, config.json, cookies.txt)
 # live in rankreel/.gitignore
 
-# Sounds uploaded in the app may be third-party licensed (e.g. Mixkit): keep them local.
-# Only the built-in, original vibration sounds are committed.
+# Uploaded sounds stay local except the explicitly selected default sound.
+# Built-in vibration sounds and the Core sound effect default are committed.
 rankreel/assets/sfx/*
 !rankreel/assets/sfx/README.txt
 !rankreel/assets/sfx/vibrate.wav
 !rankreel/assets/sfx/vibrate_double.wav
 !rankreel/assets/sfx/vibrate_heavy.wav
+!rankreel/assets/sfx/core_sound_effect.mp3
