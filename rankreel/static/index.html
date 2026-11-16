@@ -118,6 +118,27 @@
         <label class="check"><input id="optUpper" type="checkbox" checked> Uppercase title</label>
         <label class="check"><input id="optLoud" type="checkbox" checked> Normalize loudness</label>
       </div>
+      <div class="channel-card">
+        <label class="check"><input id="optCard" type="checkbox"> Channel card: your avatar and name above the title, like a post</label>
+        <div class="grid-opts" id="cardOpts">
+          <label>Channel name
+            <input id="optCardName" type="text" maxlength="40" placeholder="RankCracker">
+          </label>
+          <label>Handle
+            <input id="optCardHandle" type="text" maxlength="40" placeholder="@RankCracker (empty: hide)">
+          </label>
+          <div class="field">
+            <span>Avatar</span>
+            <div class="sfx-actions">
+              <button id="avatarUpload" class="btn small" type="button">⬆ Change avatar…</button>
+              <button id="avatarReset" class="btn small ghost" type="button" hidden>Use RankCracker avatar</button>
+              <input id="avatarFile" type="file" class="sr-only" tabindex="-1" accept="image/*">
+            </div>
+            <div id="avatarMsg" class="small muted"></div>
+          </div>
+          <label class="check"><input id="optCardVerified" type="checkbox" checked> Verified check</label>
+        </div>
+      </div>
     </section>
   </div>
 

@@ -137,3 +137,60 @@ def test_old_saved_rank_size_becomes_compact():
     assert (s.rank_font_size, s.rank_spacing, s.rank_stroke) == (46, 78, 5)
     custom = Style.model_validate({"rank_font_size": 64, "rank_spacing": 100})
     assert custom.rank_font_size == 64  # a deliberate custom size is left alone
+
+
+# --------------------------------------------------------------------------- channel card
+def _ink_rows(img, x0=0, x1=None):
+    """Rows (y) of the image that have any opaque-ish pixel."""
+    a = img.getchannel("A").crop((x0, 0, x1 or img.width, img.height))
+    w, h = a.size
+    data = a.tobytes()
+    return [y for y in range(h) if max(data[y * w:(y + 1) * w]) > 128]
+
+
+def test_channel_card_off_by_default(project_factory):
+    p = project_factory()
+    assert p.style.channel_card is False
+    plain = render_overlay(p, 0)
+    p.style.channel_name = "Someone Else"  # ignored while the card is off
+    assert render_overlay(p, 0).tobytes() == plain.tobytes()
+
+
+def test_channel_card_draws_avatar_and_pushes_title_down(project_factory):
+    from app.overlay import CARD_AVATAR, CARD_TOP
+
+    off = render_overlay(project_factory(), 0)
+    on_p = project_factory(style={"channel_card": True})
+    on = render_overlay(on_p, 0)
+    # Avatar: the RankCracker picture sits in the card row; nothing is there without the card.
+    mid = CARD_TOP + CARD_AVATAR // 2
+    assert any(off.getpixel((x, mid))[3] == 0 for x in range(0, 1080))
+    row = [on.getpixel((x, mid)) for x in range(1080)]
+    assert sum(1 for c in row if c[3] == 255) > CARD_AVATAR  # avatar + name ink
+    # The title moves below the card but stays in the title area (above the rank list).
+    title_rows_off = [y for y in _ink_rows(off) if y < on_p.style.title_area_height]
+    title_rows_on = [y for y in _ink_rows(on) if CARD_TOP + CARD_AVATAR + 10 < y < on_p.style.rank_top - 20]
+    assert min(title_rows_on) > CARD_TOP + CARD_AVATAR
+    assert max(title_rows_on) <= on_p.style.title_area_height
+    assert min(title_rows_off) < CARD_TOP + CARD_AVATAR
+    # The rank list doesn't move.
+    assert off.crop((0, 450, 1080, 1920)).tobytes() == on.crop((0, 450, 1080, 1920)).tobytes()
+
+
+def test_channel_card_verified_and_handle_optional(project_factory):
+    full = render_overlay(project_factory(style={"channel_card": True}), 0)
+    bare = render_overlay(project_factory(style={
+        "channel_card": True, "channel_handle": "", "channel_verified": False}), 0)
+    blue = (0x1D, 0x9B, 0xF0)
+    top = (0, 0, 1080, 200)
+    assert blue in _colors(full, top) and blue not in _colors(bare, top)
+
+
+def test_channel_card_missing_avatar_falls_back(project_factory, tmp_path):
+    p = project_factory(style={"channel_card": True, "channel_avatar": "does_not_exist.jpg"})
+    img = render_overlay(p, -1)
+    assert img.getchannel("A").crop((0, 0, 1080, 200)).getbbox() is not None
+    # The overlay cache tells the two avatars apart.
+    from app.overlay import overlay_key
+    q = project_factory(style={"channel_card": True})
+    assert overlay_key(p, 0) != overlay_key(q, 0)

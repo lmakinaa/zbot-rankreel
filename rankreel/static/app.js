@@ -6,6 +6,7 @@ const STORE_KEY = "rankreel.project.v1";
 const COLORS = ["#FFFFFF", "#FFD400", "#FF3B30", "#34C759"]; // then "custom"
 const MAX_SCALE = 45; // duration bar scale (s)
 const MAX_CLIPS = 10;
+const DEFAULT_AVATAR = "rankcracker.jpg";
 
 // ------------------------------------------------------------------ state
 const uid = () => Math.random().toString(16).slice(2, 14);
@@ -24,6 +25,8 @@ function freshState() {
       transition_sfx: "core_sound_effect.wav", sfx_volume: 0.8,
       rank_active_color: "#FFD400", title_uppercase: true, loudnorm: true,
       rank_font_size: 46, rank_spacing: 78, rank_stroke: 5,
+      channel_card: false, channel_name: "RankCracker", channel_handle: "@RankCracker",
+      channel_verified: true, channel_avatar: DEFAULT_AVATAR,
     },
   };
 }
@@ -444,9 +447,44 @@ function renderStyle() {
   opt.active.value = state.style.rank_active_color;
   opt.upper.checked = state.style.title_uppercase;
   opt.loud.checked = state.style.loudnorm;
+  const st = state.style;
+  $("#optCard").checked = !!st.channel_card;
+  $("#cardOpts").classList.toggle("off", !st.channel_card);
+  if (document.activeElement !== $("#optCardName")) $("#optCardName").value = st.channel_name || "";
+  if (document.activeElement !== $("#optCardHandle")) $("#optCardHandle").value = st.channel_handle || "";
+  $("#optCardVerified").checked = !!st.channel_verified;
+  $("#avatarReset").hidden = (st.channel_avatar || DEFAULT_AVATAR) === DEFAULT_AVATAR;
   applyPreviewFit();
 }
 opt.fit.addEventListener("change", () => { state.style.fit = opt.fit.value; changed(); });
+$("#optCard").addEventListener("change", (e) => { state.style.channel_card = e.target.checked; changed(); });
+$("#optCardVerified").addEventListener("change", (e) => { state.style.channel_verified = e.target.checked; changed(); });
+$("#optCardName").addEventListener("change", (e) => { state.style.channel_name = e.target.value.trim(); changed(); });
+$("#optCardHandle").addEventListener("change", (e) => { state.style.channel_handle = e.target.value.trim(); changed(); });
+$("#avatarReset").addEventListener("click", () => { state.style.channel_avatar = DEFAULT_AVATAR; $("#avatarMsg").textContent = ""; changed(); });
+$("#avatarUpload").addEventListener("click", () => $("#avatarFile").click());
+$("#avatarFile").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const msg = $("#avatarMsg");
+  msg.classList.remove("err");
+  msg.textContent = `Uploading ${file.name}…`;
+  try {
+    const res = await fetch(`/api/avatar?filename=${encodeURIComponent(file.name)}`, {
+      method: "POST", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file,
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(typeof j.detail === "string" ? j.detail : `Upload failed (${res.status})`);
+    state.style.channel_avatar = j.name;
+    state.style.channel_card = true;
+    changed();
+    msg.textContent = "Avatar updated.";
+  } catch (err) {
+    msg.classList.add("err");
+    msg.textContent = err.message;
+  }
+});
 $("#optRankSize").addEventListener("change", (e) => { setRankSize(+e.target.value); changed(); });
 opt.hold.addEventListener("change", () => { state.style.end_hold_seconds = +opt.hold.value; changed(); });
 opt.tx.addEventListener("change", () => { state.style.transition = opt.tx.value; changed(); playTransition({ audition: true }); });

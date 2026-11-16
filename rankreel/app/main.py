@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
-from .config import (DOWNLOAD_DIR, OUTPUT_DIR, PROJECTS_DIR, SFX_DIR, SFX_EXTENSIONS, STATIC_DIR,
+from .config import (BRAND_DIR, DOWNLOAD_DIR, OUTPUT_DIR, PROJECTS_DIR, SFX_DIR, SFX_EXTENSIONS, STATIC_DIR,
                      WORK_DIR, ensure_dirs)
 from .downloader import FetchError, fetch, fill_from_cache
 from .models import Project, parse_title_markup
@@ -54,7 +54,14 @@ def _api_project(project: Project) -> Project:
     sfx = project.style.transition_sfx
     if sfx and ("/" in sfx or "\\" in sfx):
         raise HTTPException(422, "Pick a transition sound from the list.")
+    _check_avatar(project)
     return project
+
+
+def _check_avatar(project: Project) -> None:
+    av = project.style.channel_avatar
+    if av and ("/" in av or "\\" in av):
+        raise HTTPException(422, "Upload the avatar picture instead of giving a path.")
 
 
 # --------------------------------------------------------------------------- UI + files
@@ -114,6 +121,7 @@ class PreviewIn(BaseModel):
 @app.post("/api/preview-overlay")
 def preview_overlay(body: PreviewIn):
     p = body.project
+    _check_avatar(p)
     step = max(-1, min(body.step, len(p.play_order) - 1))
     if sorted(p.play_order) != sorted(c.rank for c in p.clips):
         step = -1  # order invalid: show numbers only rather than failing
@@ -203,6 +211,41 @@ def delete_sfx(name: str):
         raise HTTPException(404)
     p.unlink()
     return {"deleted": name}
+
+
+MAX_AVATAR_BYTES = 15 * 1024 * 1024
+
+
+@app.post("/api/avatar")
+async def upload_avatar(request: Request, filename: str = "avatar"):
+    """Upload a channel avatar (raw image body). Saved square-cropped as a JPEG in assets/brand."""
+    if int(request.headers.get("content-length") or 0) > MAX_AVATAR_BYTES:
+        raise HTTPException(413, "That picture is over 15 MB.")
+    data = await request.body()
+    if not data:
+        raise HTTPException(422, "The file is empty.")
+    if len(data) > MAX_AVATAR_BYTES:
+        raise HTTPException(413, "That picture is over 15 MB.")
+
+    def save() -> str:
+        from PIL import Image, ImageOps, UnidentifiedImageError
+
+        try:
+            im = Image.open(io.BytesIO(data))
+            im = ImageOps.exif_transpose(im).convert("RGB")
+        except (UnidentifiedImageError, OSError):
+            raise HTTPException(422, "Couldn't read that file as a picture (use JPG, PNG or WebP).")
+        side = min(512, *im.size)
+        im = ImageOps.fit(im, (side, side), Image.LANCZOS)
+        BRAND_DIR.mkdir(parents=True, exist_ok=True)
+        stem = slugify(Path(filename).stem, 40) or "avatar"
+        name, k = f"{stem}.jpg", 2
+        while (BRAND_DIR / name).exists():
+            name, k = f"{stem}_{k}.jpg", k + 1
+        im.save(BRAND_DIR / name, quality=92)
+        return name
+
+    return {"name": await run_in_threadpool(save)}
 
 
 @app.get("/sfx/{name}", include_in_schema=False)

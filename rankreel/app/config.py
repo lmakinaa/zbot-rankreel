@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = ROOT / "static"
 ASSETS_DIR = ROOT / "assets"
 SFX_DIR = ASSETS_DIR / "sfx"
+BRAND_DIR = ASSETS_DIR / "brand"  # channel avatars for the channel card
 CACHE_DIR = ROOT / "cache"
 DOWNLOAD_DIR = CACHE_DIR / "downloads"
 OVERLAY_DIR = CACHE_DIR / "overlays"
@@ -30,7 +31,7 @@ OUTPUT_DIR = ROOT / "output"
 
 
 def ensure_dirs() -> None:
-    for d in (DOWNLOAD_DIR, OVERLAY_DIR, WORK_DIR, PROJECTS_DIR, OUTPUT_DIR, SFX_DIR):
+    for d in (DOWNLOAD_DIR, OVERLAY_DIR, WORK_DIR, PROJECTS_DIR, OUTPUT_DIR, SFX_DIR, BRAND_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -112,3 +113,11 @@ def sfx_path(name: str) -> Path:
     if not (SFX_DIR / name).exists() and name in SFX_ALIASES:
         name = SFX_ALIASES[name]
     return SFX_DIR / name
+
+
+def avatar_path(name: str) -> Path:
+    """A channel avatar: a bare file name lives in assets/brand; anything with a slash
+    is a path (relative to the project root)."""
+    if "/" in name or "\\" in name:
+        return resolve_path(name)
+    return BRAND_DIR / name

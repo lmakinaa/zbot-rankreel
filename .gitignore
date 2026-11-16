@@ -27,3 +27,7 @@ rankreel/assets/sfx/*
 !rankreel/assets/sfx/vibrate_heavy.wav
 # The default transition sound, prepared from /core-sound-effect.mp3 (also committed)
 !rankreel/assets/sfx/core_sound_effect.wav
+
+# Uploaded channel avatars stay local; the RankCracker avatar is committed.
+rankreel/assets/brand/*
+!rankreel/assets/brand/rankcracker.jpg

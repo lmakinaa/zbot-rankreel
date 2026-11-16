@@ -311,3 +311,22 @@ def test_old_core_sound_name_still_works(seeded):
     assert sfx_path("core_sound_effect.mp3") == SFX_DIR / "core_sound_effect.wav"
     body = client.post("/api/validate", json=_project(seeded, style={"transition_sfx": "core_sound_effect.mp3"})).json()
     assert not any("sound" in e for e in body["errors"]), body["errors"]
+
+
+def test_avatar_upload_and_path_rejected(seeded, tmp_path, monkeypatch):
+    import io as _io
+
+    from PIL import Image as _Image
+
+    from app import main as m
+
+    monkeypatch.setattr(m, "BRAND_DIR", tmp_path)
+    buf = _io.BytesIO()
+    _Image.new("RGB", (800, 600), (200, 30, 30)).save(buf, format="PNG")
+    r = client.post("/api/avatar?filename=My Face.png", content=buf.getvalue())
+    assert r.status_code == 200, r.text
+    name = r.json()["name"]
+    assert name == "my_face.jpg" and _Image.open(tmp_path / name).size == (512, 512)
+    assert client.post("/api/avatar?filename=x.png", content=b"not an image").status_code == 422
+    bad = _project(seeded, style={"channel_card": True, "channel_avatar": "../../etc/passwd"})
+    assert client.post("/api/preview-overlay", json={"project": bad, "step": 0}).status_code == 422

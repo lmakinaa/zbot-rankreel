@@ -82,6 +82,13 @@ class Style(BaseModel):
     # Visual transition on each cut (clips 2..N). Older projects default to "none".
     transition: Literal["none", "flash", "zoom", "punch", "fade", "slide", "shake"] = "none"
     transition_seconds: float = Field(default=0.25, ge=0.05, le=1.0)
+    # Channel card: a tweet-style header (round avatar, name, verified check, @handle)
+    # above the title, instead of a corner watermark.
+    channel_card: bool = False
+    channel_name: str = Field(default="RankCracker", max_length=40)
+    channel_handle: str = Field(default="@RankCracker", max_length=40)
+    channel_verified: bool = True
+    channel_avatar: str | None = "rankcracker.jpg"  # file name in assets/brand (or a path)
 
     @field_validator("rank_color", "rank_active_color", "background")
     @classmethod
@@ -99,10 +106,15 @@ class Style(BaseModel):
                 data["rank_stroke"] = 5
         return data
 
-    @field_validator("transition_sfx", mode="before")
+    @field_validator("transition_sfx", "channel_avatar", mode="before")
     @classmethod
     def _empty_none(cls, v):
         return v or None
+
+    @field_validator("channel_name", "channel_handle", mode="before")
+    @classmethod
+    def _strip(cls, v):
+        return v.strip() if isinstance(v, str) else v
 
 
 class Project(BaseModel):
