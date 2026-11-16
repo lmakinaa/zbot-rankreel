@@ -1,11 +1,11 @@
 ---
 name: rankreel-clip-picker
-description: Analyze TikTok videos and pick the exact start/end timestamps to clip for a viral ranking Short, then rank and order them and save a ready-to-load RankReel project. Use this whenever the user pastes one or more TikTok links and wants clips, timestamps, "the best moments", a ranking/top-N video, trims for RankReel, or asks which parts to cut — even if they only paste links with a word like "clip these", "timestamps", or "make a ranking".
+description: Analyze TikTok videos and Instagram Reels and pick the exact start/end timestamps to clip for a viral ranking Short, then rank and order them and save a ready-to-load RankReel project. Use this whenever the user pastes one or more TikTok or Instagram Reel links and wants clips, timestamps, "the best moments", a ranking/top-N video, trims for RankReel, or asks which parts to cut — even if they only paste links with a word like "clip these", "timestamps", or "make a ranking".
 ---
 
 # RankReel clip picker
 
-The user turns TikTok links into ranked-clip Shorts with RankReel, their local video tool. Your job: watch each video (via contact sheets + audio timeline), find the moments most likely to stop a scroller and get rewatched, cut them tight, rank them with the user's rules, and hand back a project they can open and render.
+The user turns TikTok and Instagram Reel links into ranked-clip Shorts with RankReel, their local video tool. Your job: watch each video (via contact sheets + audio timeline), find the moments most likely to stop a scroller and get rewatched, cut them tight, rank them with the user's rules, and hand back a project they can open and render.
 
 ## The user's ranking rules (why they matter)
 
@@ -23,7 +23,7 @@ The scripts are in this skill's `scripts/` folder; `<skill>` below means this sk
 
 - **Next to RankReel** (Claude Code in the user's project, which has a `rankreel/` folder with `rankreel/.venv/`): run the scripts with `rankreel/.venv/bin/python` from the folder that contains `rankreel/`. Downloads go into RankReel's cache, and the project is saved straight into RankReel's **Load project…** list. Work folder: `rankreel/cache/picks/<YYYYMMDD-HHMM>/`.
 - **Anywhere else** (e.g. Claude.ai): first `pip install yt-dlp pillow imageio-ffmpeg` (skip what's already installed; ffmpeg from the system works too) and run the scripts with `python`. Use a work folder like `./picks/`. The scripts detect that RankReel is missing and switch to standalone mode on their own.
-  - If downloading a link fails because the environment can't reach TikTok, ask the user to **upload the video files** and give you the matching links. Pass each as `path/to/file.mp4::https://www.tiktok.com/@user/video/123`. The link is still needed: RankReel uses it to credit the creator and download the clip when rendering.
+  - If downloading a link fails because the environment can't reach TikTok/Instagram (or Instagram asks for a login), ask the user to **upload the video files** and give you the matching links. Pass each as `path/to/file.mp4::https://www.tiktok.com/@user/video/123`. The link is still needed: RankReel uses it to credit the creator and download the clip when rendering.
   - At the end, the project file is the deliverable: save or copy it to the place this environment uses for files the user can download (e.g. `/mnt/user-data/outputs/`).
 
 ## Workflow

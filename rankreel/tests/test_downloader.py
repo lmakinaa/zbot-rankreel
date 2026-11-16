@@ -20,7 +20,7 @@ def test_normalize_strips_tiktok_tracking():
     ("ERROR: This video is private", "private"),
     ("HTTP Error 429: Too Many Requests", "rate-limiting"),
     ("ERROR: [TikTok] 123: No video formats found!", "photo/slideshow"),
-    ("ERROR: Unsupported URL: https://example.com", "Unsupported URL"),
+    ("ERROR: Unsupported URL: https://example.com", "Unsupported link"),
     ("ERROR: [TikTok] 1: Video not available, status code 10204", "removed"),
     ("This post may not be comfortable for some audiences. Log in for access", "logged-in"),
 ])
@@ -69,3 +69,43 @@ def test_real_tiktok_download(tmp_path):
     meta = dl.fetch(url, tmp_path)
     assert meta.duration > 0 and (tmp_path / meta.file).exists()
     assert meta.handle
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.instagram.com/reel/C2m0vbsx6Ea/?igsh=MTd4cWx3",
+    "https://instagram.com/reels/C2m0vbsx6Ea",
+    "https://www.instagram.com/p/C2m0vbsx6Ea/",
+    "https://www.instagram.com/tv/C2m0vbsx6Ea",
+    "https://www.instagram.com/someuser/reel/C2m0vbsx6Ea/?utm_source=ig_web_copy_link",
+])
+def test_normalize_instagram_reels(url):
+    assert dl.normalize_url(url) == "https://www.instagram.com/reel/C2m0vbsx6Ea/"
+    assert dl.cache_key(url) == dl.cache_key("https://www.instagram.com/reel/C2m0vbsx6Ea/")
+
+
+def test_instagram_profile_link_is_left_alone():
+    assert dl.normalize_url("https://www.instagram.com/someuser/") == "https://www.instagram.com/someuser/"
+
+
+def test_pick_handle_per_site():
+    ig = {"channel": "naomipq", "uploader": "B E A U T Y  F O R  A S H E S", "uploader_id": "2815873"}
+    assert dl.pick_handle(ig, "https://www.instagram.com/reel/x/") == "naomipq"
+    tt = {"uploader": "scout2015", "channel": "Scout, Suki & Stella", "uploader_id": "6704947"}
+    assert dl.pick_handle(tt, "https://www.tiktok.com/@scout2015/video/1") == "scout2015"
+    assert dl.pick_handle({"uploader": "Some Name", "uploader_id": "123"}, "https://www.tiktok.com/@x/video/1") is None
+
+
+def test_friendly_errors_name_the_site():
+    ig = "https://www.instagram.com/reel/x/"
+    msg = dl._friendly("Requested content is not available, rate-limit reached or login required", ig)
+    assert "Instagram" in msg and "cookies_from_browser" in msg
+    assert "Instagram is rate-limiting" in dl._friendly("HTTP Error 429: Too Many Requests", ig)
+    assert "Instagram Reel" in dl._friendly("Unsupported URL: https://example.com")
+
+
+@pytest.mark.network
+@pytest.mark.skipif(not os.environ.get("RANKREEL_NETWORK_TESTS"), reason="set RANKREEL_NETWORK_TESTS=1")
+def test_real_instagram_reel_download(tmp_path):
+    meta = dl.fetch("https://www.instagram.com/reel/CDUMkliABpa/?igsh=test", tmp_path)
+    assert meta.duration > 0 and meta.handle == "@clippedinandfree"
+    assert meta.webpage_url == "https://www.instagram.com/reel/CDUMkliABpa/"

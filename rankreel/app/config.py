@@ -6,6 +6,7 @@ Settings come from (highest priority first): environment variables, an optional
     RANKREEL_FFMPEG / "ffmpeg"     path to the ffmpeg binary
     RANKREEL_FFPROBE / "ffprobe"   path to the ffprobe binary
     RANKREEL_COOKIES / "cookies_file"  Netscape cookies.txt for links that need login
+    RANKREEL_COOKIES_FROM_BROWSER / "cookies_from_browser"  e.g. "firefox": use that browser's login
 """
 
 from __future__ import annotations
@@ -88,6 +89,12 @@ def ffprobe_bin() -> str:
 def cookies_file() -> str | None:
     c = setting("RANKREEL_COOKIES", "cookies_file")
     return str(resolve_path(c)) if c else None
+
+
+def cookies_from_browser() -> str | None:
+    """Use a browser's logged-in session (e.g. "firefox", "chrome"); Instagram often needs it."""
+    b = setting("RANKREEL_COOKIES_FROM_BROWSER", "cookies_from_browser")
+    return b.strip().lower() if b else None
 
 
 SFX_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}

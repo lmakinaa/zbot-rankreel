@@ -99,7 +99,7 @@ async function api(path, body, method = body ? "POST" : "GET") {
 function clientErrors() {
   const errs = [];
   for (const c of state.clips) {
-    if (!isUrl(c.url)) errs.push(`#${c.rank}: paste a TikTok link.`);
+    if (!isUrl(c.url)) errs.push(`#${c.rank}: paste a TikTok or Instagram Reel link.`);
     else if (!c.meta) errs.push(`#${c.rank}: click Fetch to download the clip.`);
     if (Number.isNaN(parseTime(c.start))) errs.push(`#${c.rank}: invalid start time "${c.start}".`);
     if (Number.isNaN(parseTime(c.end))) errs.push(`#${c.rank}: invalid end time "${c.end}".`);
@@ -276,7 +276,7 @@ function updateClip(el, c) {
 
 async function fetchClip(c, el) {
   if (!c || c.loading) return;
-  if (!isUrl(c.url)) { c.error = "Paste a full TikTok link (https://…)."; updateClip(el, c); return; }
+  if (!isUrl(c.url)) { c.error = "Paste a full TikTok or Instagram Reel link (https://…)."; updateClip(el, c); return; }
   const url = c.url.trim();
   const request = Symbol();
   clipFetches.set(c, request);

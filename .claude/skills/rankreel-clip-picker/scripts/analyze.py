@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Turn TikTok videos into material Claude can "watch": timestamped contact sheets,
+"""Turn TikTok / Instagram Reel videos into material Claude can "watch": timestamped contact sheets,
 a loudness timeline, shots/title cards, caption/subtitles and stats.
 
-Inputs can be TikTok links, local video files, or `file.mp4::https://tiktok-link`
+Inputs can be TikTok or Instagram Reel links, local video files, or `file.mp4::https://link`
 (a file you already have, plus its link for credits/rendering).
 
     python analyze.py URL_OR_FILE [...] --out WORKDIR
@@ -204,7 +204,7 @@ def loud_moments(levels: list[tuple[float, float]], top: int = 8) -> tuple[list[
 
 
 def fetch_subtitles(url: str) -> list[str]:
-    """Best-effort: TikTok sometimes has captions. Returns 'm:ss.s text' lines."""
+    """Best-effort: TikTok/Instagram sometimes have captions. Returns 'm:ss.s text' lines."""
     try:
         import yt_dlp
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as y:
@@ -239,7 +239,7 @@ def analyze_one(idx: int, item: str, out: Path, step: float, rr) -> Path:
     if not info.has_video:
         raise RuntimeError("no video stream (photo/slideshow post?)")
     handle = (meta.handle or "unknown").lstrip("@")
-    vid = re.search(r"/video/(\d+)", meta.webpage_url or url)
+    vid = re.search(r"/(?:video|reel)/([\w-]+)", meta.webpage_url or url)
     d = out / f"{idx:02d}_{re.sub(r'[^A-Za-z0-9_.-]', '', handle)[:24]}_{vid.group(1)[-6:] if vid else idx}"
     d.mkdir(parents=True, exist_ok=True)
 
@@ -284,7 +284,7 @@ def analyze_one(idx: int, item: str, out: Path, step: float, rr) -> Path:
     (d / "info.json").write_text(json.dumps(info_json, indent=2))
 
     md = [f"# Video {idx}: {meta.handle or 'unknown creator'}",
-          f"- URL: {url or '(none given: ask the user for the TikTok link, it is needed for credits and rendering)'}",
+          f"- URL: {url or '(none given: ask the user for the TikTok/Instagram link, it is needed for credits and rendering)'}",
           f"- Caption: {meta.title or '(none)'}",
           f"- Duration: {fmt(info.duration)} ({info.duration:.1f}s), {info.width}x{info.height}, "
           f"{'has audio' if info.has_audio else 'NO AUDIO'}",
@@ -333,10 +333,24 @@ class Source:
 
 
 def normalize_url(url: str) -> str:
+    """Same rules as RankReel: drop tracking queries; Instagram posts -> /reel/<id>/."""
     parts = urlsplit(url.strip())
-    if parts.netloc.lower().endswith("tiktok.com") and "/video/" in parts.path:
-        return urlunsplit((parts.scheme or "https", parts.netloc.lower(), parts.path.rstrip("/"), "", ""))
+    host = parts.netloc.lower()
+    if host.endswith("tiktok.com") and "/video/" in parts.path:
+        return urlunsplit((parts.scheme or "https", host, parts.path.rstrip("/"), "", ""))
+    if host.endswith(("instagram.com", "instagr.am")):
+        m = re.match(r"^/(?:[^/]+/)?(?:reels?|p|tv)/([A-Za-z0-9_-]+)", parts.path)
+        if m:
+            return f"https://www.instagram.com/reel/{m.group(1)}/"
     return url.strip()
+
+
+def pick_handle(info: dict, url: str) -> str | None:
+    """The creator's username: Instagram keeps it in "channel" (uploader is the display name)."""
+    insta = urlsplit(url).netloc.lower().endswith(("instagram.com", "instagr.am"))
+    keys = ("channel", "uploader_id", "uploader") if insta else ("uploader", "uploader_id", "channel", "creator")
+    ok = lambda v: isinstance(v, str) and v.strip() and not any(c.isspace() for c in v) and not v.isdigit()
+    return next((info[k] for k in keys if ok(info.get(k))), None)
 
 
 class RR:
@@ -390,14 +404,14 @@ class RR:
                     info = y.extract_info(url, download=True)
             except Exception as e:
                 msg = str(e).strip().splitlines()[-1][:300]
-                raise RuntimeError(f"download failed ({msg}). If this environment can't reach TikTok, "
+                raise RuntimeError(f"download failed ({msg}). If this environment can't reach the site, "
                                    "ask the user to upload the video file and pass it as file.mp4::link")
             if not mp4.exists():
                 other = next((p for p in self.dl_dir.glob(f"{key}.*") if p.suffix not in (".json", ".part")), None)
                 if not other:
                     raise RuntimeError("no video file downloaded (photo/slideshow post?)")
                 other.rename(mp4)
-            up = info.get("uploader") or info.get("uploader_id")
+            up = pick_handle(info, url)
             d = {"webpage_url": normalize_url(info.get("webpage_url") or url),
                  "handle": (up if not up or up.startswith("@") else f"@{up}"), "title": info.get("title")}
             meta.write_text(json.dumps(d))
@@ -406,7 +420,7 @@ class RR:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("urls", nargs="*", help="TikTok links, video files, or file.mp4::link")
+    ap.add_argument("urls", nargs="*", help="TikTok / Instagram Reel links, video files, or file.mp4::link")
     ap.add_argument("--out", help="work folder for the analysis")
     ap.add_argument("--step", type=float, default=0.5, help="seconds between frames (overview 0.5, zoom 0.2)")
     ap.add_argument("--zoom", nargs=3, metavar=("VIDEO_DIR", "START", "END"),
