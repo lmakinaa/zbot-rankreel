@@ -71,3 +71,73 @@ def ensure_default_sfx(out_dir: Path = SFX_DIR, force: bool = False) -> list[Pat
         except (subprocess.CalledProcessError, RuntimeError):
             pass  # never block startup over a sound effect
     return paths
+
+
+# --------------------------------------------------------------------------- user sounds
+# RankReel starts a transition sound exactly on the cut, the same frame the visual
+# transition (flash/zoom/shake) begins. Real-world files often start with silence
+# (and MP3s add encoder padding), which would make the hit land late. prepare_sound()
+# trims that so the attack is at 0s, removes trailing silence, de-clicks both ends and
+# levels the sound to match the built-in ones.
+
+DEFAULT_SFX = "core_sound_effect.wav"  # the default transition sound for new projects
+TARGET_RMS_DB = -12.0  # loudness of the active part, close to the vibration sounds
+_PRE_ROLL = 0.004  # keep a few ms before the attack so the transient stays crisp
+
+
+def _pcm(path: Path, rate: int = RATE):
+    import array
+
+    raw = subprocess.run([ffmpeg_bin(), "-v", "error", "-i", str(path), "-ac", "1", "-ar", str(rate),
+                          "-f", "s16le", "-"], capture_output=True, check=True).stdout
+    pcm = array.array("h")
+    pcm.frombytes(raw[: len(raw) // 2 * 2])
+    return pcm
+
+
+def sound_bounds(path: Path, threshold_db: float = -40.0) -> tuple[float, float, float, float]:
+    """(onset, end, active_rms_db, peak_db) of a sound, relative to its own peak level."""
+    import math
+
+    pcm = _pcm(path)
+    if not pcm:
+        raise ValueError("empty audio")
+    win = RATE // 200  # 5 ms windows
+    rms = []
+    for i in range(0, len(pcm), win):
+        c = pcm[i:i + win]
+        rms.append(math.sqrt(sum(x * x for x in c) / len(c)))
+    loudest = max(rms)
+    if loudest <= 0:
+        raise ValueError("the sound is silent")
+    gate = loudest * 10 ** (threshold_db / 20)
+    active = [k for k, v in enumerate(rms) if v >= gate]
+    onset, end = active[0] * win / RATE, min(len(pcm), (active[-1] + 1) * win) / RATE
+    seg = pcm[int(onset * RATE):int(end * RATE)]
+    act_rms = math.sqrt(sum(x * x for x in seg) / len(seg)) / 32768
+    peak = max(abs(x) for x in pcm) / 32768
+    return onset, end, 20 * math.log10(act_rms), 20 * math.log10(peak)
+
+
+def prepare_sound(src: Path, dst: Path) -> float:
+    """Write a cut-ready WAV of ``src`` to ``dst``; returns its duration (s)."""
+    onset, end, rms_db, peak_db = sound_bounds(src)
+    start = max(0.0, onset - _PRE_ROLL)
+    dur = end - start
+    gain = min(TARGET_RMS_DB - rms_db, PEAK_DB - peak_db)  # never clip
+    fade_out = min(0.05, dur / 4)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    # Trim by sample count on the decoded audio (the same reference sound_bounds measured);
+    # time-based seeking would be thrown off by MP3/AAC encoder delay.
+    first, last = int(start * RATE), int(end * RATE)
+    # Mono -> stereo by duplication: ffmpeg's default upmix would lower it by 3 dB.
+    info = subprocess.run([ffmpeg_bin(), "-hide_banner", "-i", str(src)], capture_output=True, text=True).stderr
+    upmix = "pan=stereo|c0=c0|c1=c0," if re.search(r"Audio:.*\bmono\b", info) else ""
+    subprocess.run([
+        ffmpeg_bin(), "-y", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(src),
+        "-af", f"{upmix}aresample={RATE},atrim=start_sample={first}:end_sample={last},asetpts=N/SR/TB,"
+               f"afade=t=in:d=0.003,afade=t=out:st={dur - fade_out:.4f}:d={fade_out:.4f},"
+               f"volume={gain:.2f}dB",
+        "-ac", "2", "-c:a", "pcm_s16le", str(dst),
+    ], check=True, capture_output=True)
+    return dur

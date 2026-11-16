@@ -9,7 +9,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .config import ffmpeg_bin, sfx_path
@@ -28,6 +28,20 @@ class ComposeError(RuntimeError):
 
 
 @dataclass
+class SfxPiece:
+    """Part of the transition sound placed inside one segment.
+
+    The sound is first cut to ``length`` (with a short fade-out if that shortens it),
+    then the slice [src_start, src_end) of it plays ``at`` seconds into the segment.
+    """
+    src_start: float
+    src_end: float
+    at: float
+    length: float
+    trimmed: bool
+
+
+@dataclass
 class SegmentSpec:
     clip: Clip
     overlay: Path
@@ -38,6 +52,7 @@ class SegmentSpec:
     sfx: Path | None
     tx_in: bool = False  # play the transition at the start of this segment
     tx_out: bool = False  # "fade" only: dip to black at the end of this segment
+    sfx_pieces: list[SfxPiece] = field(default_factory=list)
 
     @property
     def duration(self) -> float:
@@ -57,6 +72,7 @@ def _hex_ff(color: str) -> str:
     return "0x" + color.lstrip("#")
 
 
+SFX_FADE_OUT = 0.06  # when a sound is shortened to fit its transition
 ZOOM_AMOUNT = 0.18  # zoom punch starts at 118% and eases back to 100%
 SHAKE_ZOOM = 0.10  # shake headroom: up to 5% movement each way
 SHAKE_HZ = 13
@@ -118,10 +134,10 @@ def segment_command(seg: SegmentSpec, style: Style, out: Path) -> list[str]:
                 "-i", f"anullsrc=channel_layout=stereo:sample_rate={AUDIO_RATE}"]
         audio_in = f"[{next_input}:a]"
         next_input += 1
-    sfx_in = None
-    if seg.sfx:
+    sfx_ins = []
+    for _ in seg.sfx_pieces:
         cmd += ["-i", str(seg.sfx)]
-        sfx_in = f"[{next_input}:a]"
+        sfx_ins.append(f"[{next_input}:a]")
         next_input += 1
 
     if style.fit == "contain":
@@ -140,9 +156,20 @@ def segment_command(seg: SegmentSpec, style: Style, out: Path) -> list[str]:
         chain.append("loudnorm=I=-14:TP=-1.5:LRA=11")
     chain += [f"aresample={AUDIO_RATE}", afmt]
     audio = f"{audio_in}{','.join(chain)}"
-    if sfx_in:
-        audio += (f"[amain];{sfx_in}{afmt},volume={style.sfx_volume:g}[sfx];"
-                  f"[amain][sfx]amix=inputs=2:duration=first:dropout_transition=0:normalize=0")
+    if sfx_ins:
+        audio += "[amain]"
+        labels = []
+        for k, (inp, pc) in enumerate(zip(sfx_ins, seg.sfx_pieces)):
+            fade = min(SFX_FADE_OUT, pc.length / 3)
+            shape = (f"atrim=end={pc.length:.4f},afade=t=out:st={pc.length - fade:.4f}:d={fade:.4f},"
+                     if pc.trimmed else "")
+            delay = round(pc.at * 1000)
+            audio += (f";{inp}{shape}atrim=start={pc.src_start:.4f}:end={pc.src_end:.4f},"
+                      f"asetpts=PTS-STARTPTS,{afmt},volume={style.sfx_volume:g},"
+                      f"adelay={delay}:all=1[sfx{k}]")
+            labels.append(f"[sfx{k}]")
+        audio += (f";[amain]{''.join(labels)}amix=inputs={1 + len(labels)}:duration=first:"
+                  f"dropout_transition=0:normalize=0")
     audio += ",apad[aout]"
 
     cmd += [
@@ -150,7 +177,9 @@ def segment_command(seg: SegmentSpec, style: Style, out: Path) -> list[str]:
         "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-r", str(fps),
         "-pix_fmt", "yuv420p", "-profile:v", "high", "-video_track_timescale", str(fps * 512),
-        "-c:a", "aac", "-b:a", "160k", "-ar", str(AUDIO_RATE), "-ac", "2",
+        # Lossless PCM inside the segment (.mov): no AAC priming, so joined segments stay
+        # sample-accurate. The final file gets a single AAC encode in concat_segments().
+        "-c:a", "pcm_s16le", "-ar", str(AUDIO_RATE), "-ac", "2",
         "-t", f"{seg.duration:.3f}",
         "-progress", "pipe:1", "-nostats",
         str(out),
@@ -198,11 +227,46 @@ def plan_segments(project: Project, cache_dir: Path | None = None) -> list[Segme
             clip=clip, overlay=ov, start=start, length=end - start,
             hold=style.end_hold_seconds if i == len(order) - 1 else 0.0,
             has_audio=info.has_audio,
-            sfx=sfx if i > 0 else None,  # the sound marks each cut, in sync with the transition
+            sfx=sfx,
             tx_in=style.transition != "none" and i > 0,
             tx_out=style.transition == "fade" and i < len(order) - 1,
         ))
+    if sfx:
+        place_sfx(specs, style, probe(sfx).duration)
     return specs
+
+
+def transition_window(kind: str, seconds: float, prev_len: float, next_len: float) -> tuple[float, float]:
+    """(start, end) of the visual transition around a cut, relative to the cut.
+
+    Mirrors transition_graph(): effects play over the first d seconds of the incoming
+    clip; "fade" dips to black over the last d/2 of the outgoing clip and the first d/2
+    of the incoming one.
+    """
+    if kind == "none":
+        return 0.0, 0.0
+    if kind == "fade":
+        return -min(seconds, prev_len / 2) / 2, min(seconds, next_len / 2) / 2
+    return 0.0, min(seconds, next_len / 2)
+
+
+def place_sfx(specs: list[SegmentSpec], style: Style, sound_len: float) -> None:
+    """Fit the transition sound to each cut's transition: same start, same end.
+
+    With no visual transition the whole sound plays from the cut.
+    """
+    for k in range(1, len(specs)):
+        prev, nxt = specs[k - 1], specs[k]
+        a, b = transition_window(style.transition, style.transition_seconds, prev.length, nxt.length)
+        length = sound_len if b <= a else min(sound_len, b - a)
+        trimmed = length < sound_len - 1e-3
+        if a < 0:  # starts in the outgoing clip (dip to black)
+            first = min(length, -a)
+            prev.sfx_pieces.append(SfxPiece(0.0, first, prev.length + a, length, trimmed))
+            if length > first:
+                nxt.sfx_pieces.append(SfxPiece(first, length, 0.0, length, trimmed))
+        else:
+            nxt.sfx_pieces.append(SfxPiece(0.0, length, 0.0, length, trimmed))
 
 
 def concat_segments(segments: list[Path], out: Path, work_dir: Path) -> None:
@@ -213,7 +277,12 @@ def concat_segments(segments: list[Path], out: Path, work_dir: Path) -> None:
         lines.append(f"file '{escaped}'")
     list_file.write_text("\n".join(lines) + "\n")
     cmd = [ffmpeg_bin(), "-y", "-hide_banner", "-nostdin", "-f", "concat", "-safe", "0",
-           "-i", str(list_file), "-c", "copy", "-movflags", "+faststart", str(out)]
+           "-i", str(list_file),
+           # Video is copied (identical encodes, no quality loss). Audio is PCM in the segments
+           # and encoded to AAC once here. (AAC segments carry encoder "priming" that shifted
+           # the audio ~20-45 ms later at every cut: A/V drift and late transition sounds.)
+           "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-ar", str(AUDIO_RATE), "-ac", "2",
+           "-movflags", "+faststart", str(out)]
     _run_ffmpeg(cmd, work_dir / "concat.log", 0)
 
 
@@ -229,7 +298,7 @@ def compose(project: Project, out_path: Path, work_dir: Path,
     for k, seg in enumerate(specs):
         msg = f"Segment {k + 1} of {n} (#{seg.clip.rank})"
         report(k / (n + 0.2), msg)
-        out = work_dir / f"seg_{k:02d}.mp4"
+        out = work_dir / f"seg_{k:02d}.mov"
         _run_ffmpeg(
             segment_command(seg, project.style, out), work_dir / f"seg_{k:02d}.log", seg.duration,
             on_time=lambda f, k=k, msg=msg: report((k + f) / (n + 0.2), msg),

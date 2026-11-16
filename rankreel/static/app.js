@@ -21,7 +21,7 @@ function freshState() {
     playOrder: [5, 4, 3, 2, 1],
     style: {
       fit: "cover", end_hold_seconds: 0, transition: "none", transition_seconds: 0.25,
-      transition_sfx: "core_sound_effect.mp3", sfx_volume: 0.8,
+      transition_sfx: "core_sound_effect.wav", sfx_volume: 0.8,
       rank_active_color: "#FFD400", title_uppercase: true, loudnorm: true,
     },
   };
@@ -443,21 +443,36 @@ function renderStyle() {
 }
 opt.fit.addEventListener("change", () => { state.style.fit = opt.fit.value; changed(); });
 opt.hold.addEventListener("change", () => { state.style.end_hold_seconds = +opt.hold.value; changed(); });
-opt.tx.addEventListener("change", () => { state.style.transition = opt.tx.value; changed(); playTransition(); });
-opt.txDur.addEventListener("change", () => { state.style.transition_seconds = +opt.txDur.value; changed(); playTransition(); });
+opt.tx.addEventListener("change", () => { state.style.transition = opt.tx.value; changed(); playTransition({ audition: true }); });
+opt.txDur.addEventListener("change", () => { state.style.transition_seconds = +opt.txDur.value; changed(); playTransition({ audition: true }); });
 opt.sfx.addEventListener("change", () => { state.style.transition_sfx = opt.sfx.value; changed(); playSfx(); });
 opt.sfxVol.addEventListener("change", () => { state.style.sfx_volume = +opt.sfxVol.value; changed(); playSfx(); });
 
 const sfxAudio = new Audio();
 /** Play the chosen transition sound (audition, and on cuts in the live preview). */
+let sfxStopTimers = [];
+/** Play the transition sound like the render does: from its start for as long as the
+ *  visual transition lasts (whole sound when there's no transition), then a short fade. */
 function playSfx() {
   const name = state.style.transition_sfx;
   if (!name) return;
   const src = `/sfx/${encodeURIComponent(name)}`;
   if (!sfxAudio.src.endsWith(src)) sfxAudio.src = src;
-  sfxAudio.volume = Math.min(1, state.style.sfx_volume / 1.2);
+  const vol = Math.min(1, state.style.sfx_volume / 1.2);
+  sfxStopTimers.forEach(clearTimeout);
+  sfxStopTimers = [];
+  sfxAudio.volume = vol;
   sfxAudio.currentTime = 0;
   sfxAudio.play().catch(() => {});
+  if (state.style.transition === "none") return;
+  const lenMs = state.style.transition_seconds * 1000;
+  const fadeMs = Math.min(60, lenMs / 3);
+  const steps = 6;
+  for (let k = 1; k <= steps; k++) {
+    sfxStopTimers.push(setTimeout(() => { sfxAudio.volume = vol * (1 - k / steps); },
+      lenMs - fadeMs + (fadeMs * k) / steps));
+  }
+  sfxStopTimers.push(setTimeout(() => { sfxAudio.pause(); sfxAudio.volume = vol; }, lenMs + 5));
 }
 const sfxLabel = (f) => {
   const base = f.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
@@ -625,12 +640,14 @@ function seek(video, t) {
 const refreshPreview = debounce(() => { if (!playing) showStep(Math.min(previewStep, state.playOrder.length - 1)); }, 250);
 
 /** CSS approximation of the rendered transition (footage only; the overlay stays still). */
-function playTransition({ out = false } = {}) {
+function playTransition({ out = false, audition = false } = {}) {
   const kind = state.style.transition;
   const ms = state.style.transition_seconds * 1000;
   const fx = $("#pvFx");
   const ease = "cubic-bezier(.2,.7,.3,1)";
-  if (!out) playSfx();
+  // Same timing as the render: the sound starts when the visual transition starts:
+  // at the cut, or for "dip to black" when the screen starts darkening.
+  if (audition || (kind === "fade" ? out : !out)) playSfx();
   if (kind === "none") return;
   if (kind === "shake") {
     const frames = [];

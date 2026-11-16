@@ -68,7 +68,7 @@ test("opening an older project does not add an unrequested sound", () => {
 
 test("new projects use the supplied transition sound", () => {
   const { run } = editor();
-  assert.equal(run("freshState().style.transition_sfx"), "core_sound_effect.mp3");
+  assert.equal(run("freshState().style.transition_sfx"), "core_sound_effect.wav");
 });
 
 test("formatted timestamps round-trip across minute and hour boundaries", () => {

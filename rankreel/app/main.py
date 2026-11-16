@@ -8,7 +8,6 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-import shutil
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request
@@ -24,7 +23,9 @@ from .models import Project, parse_title_markup
 from .overlay import render_overlay
 from .render_job import JobManager, slugify
 from .probe import probe
-from .sfx_gen import SOUNDS as BUILTIN_SFX, ensure_default_sfx
+from .sfx_gen import DEFAULT_SFX, SOUNDS, ensure_default_sfx, prepare_sound
+
+BUILTIN_SFX = {*SOUNDS, DEFAULT_SFX}  # listed as built-in and protected from deletion
 from .validate import validate_project
 
 ensure_dirs()
@@ -181,11 +182,16 @@ async def upload_sfx(request: Request, filename: str):
             raise HTTPException(
                 422, f"That sound is {info.duration:.1f}s; keep transition sounds under {MAX_SFX_SECONDS:g}s "
                      "(trim it first).")
-        name = _unique_sfx_name(slugify(Path(filename).stem, 40), ext)
-        shutil.move(str(tmp), SFX_DIR / name)
+        # Saved as a cut-ready WAV: leading silence trimmed so the sound hits exactly on
+        # the cut (in sync with the visual transition), ends de-clicked, level matched.
+        name = _unique_sfx_name(slugify(Path(filename).stem, 40), ".wav")
+        try:
+            duration = await run_in_threadpool(prepare_sound, tmp, SFX_DIR / name)
+        except ValueError as e:
+            raise HTTPException(422, f"That sound can't be used: {e}.")
     finally:
         tmp.unlink(missing_ok=True)
-    return {"name": name, "duration": round(info.duration, 3)}
+    return {"name": name, "duration": round(duration, 3)}
 
 
 @app.delete("/api/sfx/{name}")

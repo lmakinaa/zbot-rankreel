@@ -272,3 +272,31 @@ def test_save_unique_never_overwrites():
     finally:
         for suffix in ("", "_2", "_3"):
             (PROJECTS_DIR / f"{name}{suffix}.json").unlink(missing_ok=True)
+
+
+
+def test_uploaded_mp3_is_trimmed_to_hit_on_the_cut(tmp_path):
+    import subprocess
+    from app.config import SFX_DIR, ffmpeg_bin
+    from app.sfx_gen import sound_bounds
+    src = tmp_path / "late.mp3"
+    subprocess.run([ffmpeg_bin(), "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                    "sine=frequency=900:duration=0.5", "-af", "adelay=250:all=1", str(src)], check=True)
+    r = client.post("/api/sfx?filename=Late Hit.mp3", content=src.read_bytes())
+    assert r.status_code == 200, r.text
+    name = r.json()["name"]
+    try:
+        assert name.startswith("late_hit") and name.endswith(".wav")
+        assert sound_bounds(SFX_DIR / name)[0] <= 0.006
+    finally:
+        client.delete(f"/api/sfx/{name}")
+
+
+def test_default_sound_is_protected_if_installed():
+    from app.config import SFX_DIR
+    from app.sfx_gen import DEFAULT_SFX
+    if not (SFX_DIR / DEFAULT_SFX).exists():
+        pytest.skip("default sound not installed on this machine")
+    items = {i["name"]: i["builtin"] for i in client.get("/api/sfx").json()}
+    assert items[DEFAULT_SFX] is True
+    assert client.delete(f"/api/sfx/{DEFAULT_SFX}").status_code == 422
