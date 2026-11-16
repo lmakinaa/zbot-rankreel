@@ -93,7 +93,15 @@ def cookies_file() -> str | None:
 SFX_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}
 
 
+# Sounds that were renamed: projects saved with the old name still find them.
+SFX_ALIASES = {"core_sound_effect.mp3": "core_sound_effect.wav"}
+
+
 def sfx_path(name: str) -> Path:
     """A transition sound: a bare file name lives in assets/sfx; anything with a
     slash is a path (relative to the project root)."""
-    return resolve_path(name) if ("/" in name or "\\" in name) else SFX_DIR / name
+    if "/" in name or "\\" in name:
+        return resolve_path(name)
+    if not (SFX_DIR / name).exists() and name in SFX_ALIASES:
+        name = SFX_ALIASES[name]
+    return SFX_DIR / name

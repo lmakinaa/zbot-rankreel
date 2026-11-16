@@ -300,3 +300,14 @@ def test_default_sound_is_protected_if_installed():
     items = {i["name"]: i["builtin"] for i in client.get("/api/sfx").json()}
     assert items[DEFAULT_SFX] is True
     assert client.delete(f"/api/sfx/{DEFAULT_SFX}").status_code == 422
+
+
+
+def test_old_core_sound_name_still_works(seeded):
+    """Projects saved while the default was core_sound_effect.mp3 find the prepared .wav."""
+    from app.config import SFX_DIR, sfx_path
+    if not (SFX_DIR / "core_sound_effect.wav").exists():
+        pytest.skip("default sound not installed on this machine")
+    assert sfx_path("core_sound_effect.mp3") == SFX_DIR / "core_sound_effect.wav"
+    body = client.post("/api/validate", json=_project(seeded, style={"transition_sfx": "core_sound_effect.mp3"})).json()
+    assert not any("sound" in e for e in body["errors"]), body["errors"]

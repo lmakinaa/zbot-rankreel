@@ -483,6 +483,7 @@ opt.upper.addEventListener("change", () => { state.style.title_uppercase = opt.u
 opt.loud.addEventListener("change", () => { state.style.loudnorm = opt.loud.checked; changed(); });
 
 const MAX_SFX_MB = 10;
+const SFX_ALIASES = { "core_sound_effect.mp3": "core_sound_effect.wav" }; // keep in sync with app/config.py
 let sfxList = []; // [{name, builtin}]
 
 async function loadSfx() {
@@ -500,6 +501,11 @@ async function loadSfx() {
   opt.sfx.replaceChildren(new Option("None", ""), group("Built-in", builtin));
   if (custom.length) opt.sfx.append(group("Your sounds", custom));
   const names = sfxList.map((f) => f.name);
+  const renamed = SFX_ALIASES[state.style.transition_sfx];
+  if (renamed && !names.includes(state.style.transition_sfx) && names.includes(renamed)) {
+    state.style.transition_sfx = renamed; // project saved with the sound's old name
+    persist();
+  }
   if (state.style.transition_sfx && !names.includes(state.style.transition_sfx)) {
     sfxMessage(`"${state.style.transition_sfx}" is no longer available; sound set to None.`, true);
     state.style.transition_sfx = "";

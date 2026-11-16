@@ -25,4 +25,5 @@ rankreel/assets/sfx/*
 !rankreel/assets/sfx/vibrate.wav
 !rankreel/assets/sfx/vibrate_double.wav
 !rankreel/assets/sfx/vibrate_heavy.wav
-!rankreel/assets/sfx/core_sound_effect.mp3
+# The default transition sound, prepared from /core-sound-effect.mp3 (also committed)
+!rankreel/assets/sfx/core_sound_effect.wav
