@@ -439,7 +439,7 @@ function renderStyle() {
   opt.active.value = state.style.rank_active_color;
   opt.upper.checked = state.style.title_uppercase;
   opt.loud.checked = state.style.loudnorm;
-  $("#phone").classList.toggle("contain", state.style.fit === "contain");
+  applyPreviewFit();
 }
 opt.fit.addEventListener("change", () => { state.style.fit = opt.fit.value; changed(); });
 opt.hold.addEventListener("change", () => { state.style.end_hold_seconds = +opt.hold.value; changed(); });
@@ -637,6 +637,44 @@ async function showStep(step) {
     if (gen === overlayGen) pvOverlay.src = url;
   } catch { /* validation shows the error */ }
 }
+
+// ---- preview fit: mirrors effective_fit() in app/compose.py
+const MAX_FILL_CROP = 0.06;
+const pvBg = $("#pvBg");
+
+function effectiveFit(w, h) {
+  const fit = state.style.fit;
+  if (fit !== "cover") return fit;
+  if (!w || !h) return "crop";
+  const src = w / h, dst = 9 / 16;
+  return 1 - Math.min(src, dst) / Math.max(src, dst) <= MAX_FILL_CROP ? "crop" : "blur";
+}
+
+function applyPreviewFit() {
+  const mode = effectiveFit(pv.videoWidth, pv.videoHeight);
+  const phone = $("#phone");
+  phone.classList.toggle("whole", mode !== "crop");
+  phone.classList.toggle("blur", mode === "blur");
+  if (mode === "blur") paintBackdrop();
+}
+
+/** Blurred backdrop for "show whole video": a tiny cover-scaled copy of the current frame. */
+function paintBackdrop() {
+  if (!pv.videoWidth) return;
+  const ctx = pvBg.getContext("2d");
+  const W = pvBg.width, H = pvBg.height;
+  const s = Math.max(W / pv.videoWidth, H / pv.videoHeight);
+  const w = pv.videoWidth * s, h = pv.videoHeight * s;
+  try { ctx.drawImage(pv, (W - w) / 2, (H - h) / 2, w, h); } catch { /* frame not ready */ }
+}
+pv.addEventListener("loadedmetadata", applyPreviewFit);
+pv.addEventListener("seeked", () => $("#phone").classList.contains("blur") && paintBackdrop());
+let lastBackdrop = 0;
+pv.addEventListener("timeupdate", () => {
+  if (!$("#phone").classList.contains("blur")) return;
+  const now = performance.now();
+  if (now - lastBackdrop > 200) { lastBackdrop = now; paintBackdrop(); }
+});
 
 function seek(video, t) {
   if (video.readyState >= 1) video.currentTime = t;

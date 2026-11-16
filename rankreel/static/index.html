@@ -59,7 +59,12 @@
       <h2><span class="step">4</span> Style</h2>
       <div class="grid-opts">
         <label>Fit
-          <select id="optFit"><option value="cover">Cover (crop to fill)</option><option value="contain">Contain (black bars)</option></select>
+          <select id="optFit">
+            <option value="cover">Smart fill (crop vertical clips, show others whole)</option>
+            <option value="blur">Show whole video, blurred background</option>
+            <option value="contain">Show whole video, black bars</option>
+            <option value="crop">Crop to fill (always)</option>
+          </select>
         </label>
         <label>End hold
           <select id="optHold"><option value="0">None</option><option value="0.3">0.3s freeze (cleaner loop)</option><option value="0.5">0.5s freeze</option></select>
@@ -112,6 +117,7 @@
   <aside class="side">
     <section class="card sticky">
       <div class="phone" id="phone">
+        <canvas id="pvBg" class="pv-bg" width="54" height="96" aria-hidden="true"></canvas>
         <video id="pv" playsinline preload="auto"></video>
         <div id="pvFx" class="pv-fx"></div>
         <img id="pvOverlay" alt="">

@@ -244,3 +244,82 @@ def test_sound_fits_the_transition_window(tmp_path, long_sound, kind, seconds, w
         want_s, want_e = cut + window[0], cut + window[1]
         assert abs(s - want_s) <= 1 / 30, f"{kind}: sound starts {s:.3f}s, transition starts {want_s:.3f}s"
         assert abs(e - want_e) <= 0.04, f"{kind}: sound ends {e:.3f}s, transition ends {want_e:.3f}s"
+
+
+# ---------------------------------------------------------------- fit modes
+def _edge_striped_square(path, size=720):
+    """Red square video with bright green 12px stripes on the left and right edges."""
+    import subprocess
+    from app.config import ffmpeg_bin
+    subprocess.run([ffmpeg_bin(), "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                    f"color=c=red:s={size}x{size}:r=25:d=3", "-vf",
+                    f"drawbox=x=0:y=0:w=12:h={size}:color=lime:t=fill,"
+                    f"drawbox=x={size - 12}:y=0:w=12:h={size}:color=lime:t=fill",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)], check=True)
+    return path
+
+
+def _pixel(path, x, y, t=1.0):
+    import subprocess
+    from app.config import ffmpeg_bin
+    raw = subprocess.run([ffmpeg_bin(), "-v", "error", "-ss", str(t), "-i", str(path), "-frames:v", "1",
+                          "-vf", f"crop=4:4:{x}:{y},scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                         capture_output=True, check=True).stdout
+    return tuple(raw[:3])
+
+
+@pytest.mark.parametrize("fit,edges_visible", [
+    ("cover", True),     # square isn't ~9:16, so smart fill shows it whole
+    ("blur", True),
+    ("contain", True),
+    ("crop", False),     # always crops: the edge stripes are cut off
+])
+def test_fit_modes_on_a_square_clip(tmp_path, fit, edges_visible):
+    src = _edge_striped_square(tmp_path / "sq.mp4")
+    p = Project.model_validate({
+        "title": "T", "play_order": [1],
+        "clips": [{"url": "https://www.instagram.com/reel/abc/", "rank": 1, "start": 0, "end": 2,
+                   "local_path": str(src)}],
+        "style": {"fit": fit},
+    })
+    out = compose(p, tmp_path / "o.mp4", tmp_path / "w")
+    # Square scaled to full width (1080) and centred: rows 420..1500. Sample the far edges mid-height.
+    for x in (2, 1074):
+        r, g, b = _pixel(out, x, 1300)
+        is_green = g > 150 and r < 120
+        assert is_green == edges_visible, (fit, x, (r, g, b))
+    if fit in ("cover", "blur"):
+        r, g, b = _pixel(out, 540, 1800)  # below the video: blurred backdrop, not black
+        assert r + g + b > 60, (r, g, b)
+    if fit == "contain":
+        assert sum(_pixel(out, 540, 1800)) < 30  # plain black bars
+
+
+def test_smart_fill_keeps_vertical_clips_identical_to_crop(tmp_path):
+    from app.compose import effective_fit, crop_share
+    from app.models import Style
+    assert crop_share(1080, 1920, 1080, 1920) == 0
+    assert crop_share(576, 1054, 1080, 1920) < 0.06       # slightly-off TikTok: still fills
+    assert crop_share(720, 720, 1080, 1920) > 0.4         # square Reel
+    st = Style()
+    from app.compose import SegmentSpec
+    mk = lambda w, h: SegmentSpec(clip=None, overlay=None, start=0, length=1, hold=0, has_audio=False,
+                                  sfx=None, src_w=w, src_h=h)
+    assert effective_fit(st, mk(720, 1280)) == "crop"
+    assert effective_fit(st, mk(720, 720)) == "blur"
+    assert effective_fit(st, mk(1920, 1080)) == "blur"
+    assert effective_fit(Style(fit="crop"), mk(720, 720)) == "crop"
+
+
+def test_probe_reports_displayed_size_of_rotated_video(tmp_path):
+    import subprocess
+    from app.config import ffmpeg_bin
+    landscape = tmp_path / "l.mp4"
+    subprocess.run([ffmpeg_bin(), "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                    "color=c=blue:s=320x180:r=25:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    str(landscape)], check=True)
+    rotated = tmp_path / "r.mp4"  # stored 320x180 but displayed portrait (like phone footage)
+    subprocess.run([ffmpeg_bin(), "-y", "-loglevel", "error", "-display_rotation", "90", "-i", str(landscape),
+                    "-c", "copy", str(rotated)], check=True)
+    info = probe(rotated)
+    assert (info.width, info.height) == (180, 320)

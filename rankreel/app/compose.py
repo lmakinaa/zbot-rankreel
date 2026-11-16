@@ -50,6 +50,8 @@ class SegmentSpec:
     hold: float  # extra frozen-frame seconds at the end
     has_audio: bool
     sfx: Path | None
+    src_w: int | None = None  # displayed size of the source (rotation applied)
+    src_h: int | None = None
     tx_in: bool = False  # play the transition at the start of this segment
     tx_out: bool = False  # "fade" only: dip to black at the end of this segment
     sfx_pieces: list[SfxPiece] = field(default_factory=list)
@@ -119,6 +121,46 @@ def transition_graph(seg: SegmentSpec, style: Style, src: str, dst: str) -> str:
     return f"{graph}{dst}"
 
 
+# Every fit mode hands the same pixel format to the transition and overlay steps.
+PIX = "format=yuv420p"
+MAX_FILL_CROP = 0.06  # "cover" crops at most this share of the picture, else shows it whole
+
+
+def crop_share(src_w: int | None, src_h: int | None, W: int, H: int) -> float:
+    """Share of the picture that cropping to fill W x H would cut off (0 = none)."""
+    if not src_w or not src_h:
+        return 0.0
+    src, dst = src_w / src_h, W / H
+    return 1 - min(src, dst) / max(src, dst)
+
+
+def effective_fit(style: Style, seg: SegmentSpec) -> str:
+    if style.fit != "cover":
+        return style.fit
+    return "crop" if crop_share(seg.src_w, seg.src_h, style.width, style.height) <= MAX_FILL_CROP else "blur"
+
+
+def fit_graph(style: Style, seg: SegmentSpec, src: str, dst: str) -> str:
+    """Filtergraph placing the source in the W x H frame according to the fit mode."""
+    W, H = style.width, style.height
+    mode = effective_fit(style, seg)
+    if mode == "crop":
+        return f"{src}scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},{PIX}{dst}"
+    whole = f"scale={W}:{H}:force_original_aspect_ratio=decrease:force_divisible_by=2"
+    if mode == "contain":
+        return (f"{src}{whole},pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color={_hex_ff(style.background)},{PIX}{dst}")
+    # blur: the whole video, centred over a blurred, darkened, zoomed copy of itself.
+    # Blurring at 1/8 size and scaling back up is fast and gives a smooth backdrop.
+    w8, h8 = W // 8, H // 8
+    return (f"{src}split=2[fitbg][fitfg];"
+            f"[fitbg]scale={w8}:{h8}:force_original_aspect_ratio=increase,crop={w8}:{h8},"
+            # Darken with a translucent black layer, not eq: eq's frames were later brightened
+            # by the white "flash" transition for the rest of the clip (ffmpeg quirk).
+            f"boxblur=6:2,drawbox=c=black@0.25:t=fill,scale={W}:{H}[fitbgb];"
+            f"[fitfg]{whole}[fitfgs];"
+            f"[fitbgb][fitfgs]overlay=(W-w)/2:(H-h)/2:format=yuv420,{PIX}{dst}")
+
+
 def segment_command(seg: SegmentSpec, style: Style, out: Path) -> list[str]:
     W, H, fps = style.width, style.height, style.fps
     cmd = [
@@ -140,13 +182,9 @@ def segment_command(seg: SegmentSpec, style: Style, out: Path) -> list[str]:
         sfx_ins.append(f"[{next_input}:a]")
         next_input += 1
 
-    if style.fit == "contain":
-        fit = (f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
-               f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color={_hex_ff(style.background)}")
-    else:
-        fit = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}"
     hold = f",tpad=stop_mode=clone:stop_duration={seg.hold:.3f}" if seg.hold > 0 else ""
-    video = (f"[0:v]{fit},fps={fps},setsar=1[vfit];"
+    video = (f"[0:v]fps={fps}[vsrc];{fit_graph(style, seg, '[vsrc]', '[vfit0]')};"
+             f"[vfit0]setsar=1[vfit];"
              f"{transition_graph(seg, style, '[vfit]', '[v]')};"
              f"[v][1:v]overlay=0:0:shortest=1,format=yuv420p{hold}[vout]")
 
@@ -228,6 +266,7 @@ def plan_segments(project: Project, cache_dir: Path | None = None) -> list[Segme
             hold=style.end_hold_seconds if i == len(order) - 1 else 0.0,
             has_audio=info.has_audio,
             sfx=sfx,
+            src_w=info.width, src_h=info.height,
             tx_in=style.transition != "none" and i > 0,
             tx_out=style.transition == "fade" and i < len(order) - 1,
         ))

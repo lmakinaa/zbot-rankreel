@@ -67,7 +67,11 @@ class Style(BaseModel):
     rank_spacing: int = 110
     rank_color: str = "#FFFFFF"
     rank_active_color: str = "#FFD400"  # the rank currently playing
-    fit: Literal["cover", "contain"] = "cover"
+    # cover: fill the frame, but never cut off much of the picture: when a clip isn't
+    #        (nearly) 9:16, show it whole on a blurred background instead.
+    # blur: always whole, on a blurred background. contain: whole, plain bars.
+    # crop: always fill by cropping.
+    fit: Literal["cover", "blur", "contain", "crop"] = "cover"
     background: str = "#000000"
     font_path: str = "assets/fonts/Montserrat-Black.ttf"
     transition_sfx: str | None = None  # file name (or path) in assets/sfx

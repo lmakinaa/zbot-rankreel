@@ -39,11 +39,29 @@ def probe(path: str | Path) -> MediaInfo:
     duration = data.get("format", {}).get("duration")
     if duration is None and video:
         duration = video[0].get("duration")
+    width = int(video[0]["width"]) if video else None
+    height = int(video[0]["height"]) if video else None
+    if video and _rotation(video[0]) % 180 == 90:
+        width, height = height, width  # phones store portrait video rotated; ffmpeg un-rotates it
     return MediaInfo(
         duration=float(duration or 0.0),
-        width=int(video[0]["width"]) if video else None,
-        height=int(video[0]["height"]) if video else None,
+        width=width,
+        height=height,
         has_video=bool(video),
         has_audio=bool(audio),
         vcodec=video[0].get("codec_name") if video else None,
     )
+
+
+def _rotation(stream: dict) -> int:
+    """Display rotation in degrees (0/90/180/270) from side data or the legacy rotate tag."""
+    for sd in stream.get("side_data_list") or []:
+        if "rotation" in sd:
+            try:
+                return int(round(float(sd["rotation"]))) % 360
+            except (TypeError, ValueError):
+                pass
+    try:
+        return int(stream.get("tags", {}).get("rotate", 0)) % 360
+    except (TypeError, ValueError):
+        return 0

@@ -84,7 +84,7 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, monospace; 
 .url-row .url { flex: 1; font-family: ui-monospace, monospace; font-size: 12px; }
 .clip-body { display: flex; gap: 12px; margin-top: 8px; }
 .thumb { width: 120px; flex: none; }
-.thumb video { width: 120px; aspect-ratio: 9 / 16; object-fit: cover; background: #000; border-radius: 6px; display: block; }
+.thumb video { width: 120px; aspect-ratio: 9 / 16; object-fit: contain; background: #000; border-radius: 6px; display: block; }
 .trim { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .trim-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .trim-row label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
@@ -125,7 +125,9 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, monospace; 
 .phone { position: relative; width: 100%; max-width: 300px; margin: 0 auto; aspect-ratio: 9 / 16; background: #000; border-radius: 14px; overflow: hidden; }
 .phone video, .phone img { position: absolute; inset: 0; width: 100%; height: 100%; }
 .phone video { object-fit: cover; }
-.phone.contain video { object-fit: contain; }
+.phone.whole video { object-fit: contain; }
+.pv-bg { position: absolute; inset: 0; width: 100%; height: 100%; display: none; filter: blur(6px) brightness(.88) saturate(1.15); transform: scale(1.08); }
+.phone.whole.blur .pv-bg { display: block; }
 .pv-fx { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
 .pv-empty { position: absolute; inset: auto 0 18% 0; text-align: center; color: #666; font-size: 12px; }
 .pv-controls { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; align-items: center; }
