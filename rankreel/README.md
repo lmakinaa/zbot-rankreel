@@ -4,6 +4,62 @@ Turn TikTok links into a vertical ranked-clip Short: a big title on top with col
 
 Output: a 1080×1920 / 30 fps MP4 plus a `credits.txt` with each creator's handle and link for the description.
 
+## Run with Podman
+
+Run these commands from the repository root (the directory containing `Containerfile`). The base image comes directly from Fedora's registry (`registry.fedoraproject.org/fedora:44`). The image includes Python, FFmpeg/FFprobe (downloaded at build time by `static-ffmpeg`), the font, and the Core sound effect.
+
+On macOS or Windows, initialize Podman's VM once if needed, then start it:
+
+```bash
+podman machine init          # first time only
+podman machine start        # if it is not already running
+```
+
+Build and start the app:
+
+```bash
+podman build --format docker -t localhost/rankreel:latest .
+podman run -d --name rankreel --init --restart unless-stopped \
+  -p 127.0.0.1:8766:8765 \
+  -v rankreel-cache:/app/cache \
+  -v rankreel-projects:/app/projects \
+  -v rankreel-output:/app/output \
+  -v rankreel-sfx:/app/assets/sfx \
+  localhost/rankreel:latest
+```
+
+Open [RankReel](http://127.0.0.1:8766). It runs as a non-root user inside the container and the published port listens only on this computer. The image format keeps the built-in health check available to Podman. The host uses port 8766 so it can coexist with services already using 8765; the app still uses 8765 inside the container.
+
+The four named volumes preserve downloaded clips, projects, finished videos, and uploaded sounds when the container is recreated. The sounds volume starts with the bundled sounds, including Core sound effect. These volumes are separate from any files made by a host Python install. Download videos through the app, or copy files out with `podman cp rankreel:/app/output/. ./exports`.
+
+```bash
+podman stop rankreel         # stop
+podman start rankreel        # start the existing container again
+podman logs -f rankreel      # view logs
+podman healthcheck run rankreel
+```
+
+To update, rebuild the image, stop and remove just the container with `podman stop rankreel` and `podman rm rankreel`, then repeat `podman run` above with the same volume names. Saved data stays in those volumes.
+
+Run the full test suite, including the editor tests, in a disposable test container:
+
+```bash
+podman build --format docker --target test -t localhost/rankreel-test .
+podman run --rm localhost/rankreel-test
+```
+
+Local `config.json`, cookies, caches, projects, renders, and other uploaded sounds are excluded from the build context. If a link needs login, mount your cookies file read-only at `/run/cookies.txt` and add `-e RANKREEL_COOKIES=/run/cookies.txt` to `podman run`.
+
+If image downloads report an unknown certificate authority on a managed Mac, import the Mac's trusted certificates into the VM, then retry:
+
+```bash
+podman machine stop
+podman machine set --import-native-ca
+podman machine start
+```
+
+See the [Podman build](https://docs.podman.io/en/stable/markdown/podman-build.1.html) and [run](https://docs.podman.io/en/stable/markdown/podman-run.1.html) references for more options.
+
 ## Install
 
 You need **Python 3.11+** and **ffmpeg** (with ffprobe):
