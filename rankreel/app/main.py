@@ -348,7 +348,7 @@ def projects_import(body: ImportIn):
 
 @app.post("/api/projects")
 def projects_save(body: SaveIn):
-    base = slugify(body.name or body.project.title_text() or "project", 64)
+    base = slugify(body.name or body.project.name_text() or "project", 64)
     name, k = base, 2
     while body.unique and (PROJECTS_DIR / f"{name}.json").exists():
         name, k = f"{base}_{k}", k + 1

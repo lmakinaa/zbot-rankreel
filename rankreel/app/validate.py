@@ -38,7 +38,9 @@ def clip_bounds(clip: Clip) -> tuple[float, float | None]:
     return start, end
 
 
-def _label(clip: Clip) -> str:
+def _label(clip: Clip, single: bool = False) -> str:
+    if single:
+        return "The clip"
     return f"#{clip.rank}" + (f" ({clip.name})" if clip.name else "")
 
 
@@ -48,11 +50,25 @@ def validate_project(project: Project, require_sources: bool = False) -> Validat
     hints: list[str] = []
     lengths: dict[str, float | None] = {}
 
+    single = project.format == "single"
     clips = project.clips
     n = len(clips)
     if n == 0:
         errors.append("Add at least one clip.")
-    if n > MAX_CLIPS:
+    if single:
+        if n > 1:
+            errors.append(f"The single-clip format uses one clip (got {n}).")
+        if not project.caption.strip():
+            hints.append("Add the text (a fact or caption about the clip).")
+        else:
+            from .overlay import post_is_cut
+
+            try:
+                if post_is_cut(project):
+                    warnings.append("The text is too long to fit; the end is cut off. Shorten it.")
+            except FileNotFoundError:
+                pass
+    elif n > MAX_CLIPS:
         errors.append(f"{n} clips is too many (max {MAX_CLIPS}).")
     elif 0 < n < MIN_CLIPS_HINT:
         hints.append(f"Only {n} clip(s); ranking videos usually have 3-10 (5 is typical).")
@@ -78,7 +94,7 @@ def validate_project(project: Project, require_sources: bool = False) -> Validat
             "Playback order must contain every rank exactly once "
             f"(got {order}, ranks are {sorted(ranks)})."
         )
-    elif n and order[-1] != 1 and 1 in ranks:
+    elif n and order[-1] != 1 and 1 in ranks and not single:
         hints.append("Trend tip: #1 usually plays last.")
 
     sfx = project.style.transition_sfx
@@ -92,11 +108,11 @@ def validate_project(project: Project, require_sources: bool = False) -> Validat
         start, end = clip_bounds(c)
         if c.end is not None and c.source_duration is not None and c.end > c.source_duration + _EPS:
             errors.append(
-                f"{_label(c)}: end {c.end:.2f}s is past the video's end ({c.source_duration:.2f}s)."
+                f"{_label(c, single)}: end {c.end:.2f}s is past the video's end ({c.source_duration:.2f}s)."
             )
         if c.source_duration is not None and start >= c.source_duration:
             errors.append(
-                f"{_label(c)}: start {start:.2f}s is past the video's end ({c.source_duration:.2f}s)."
+                f"{_label(c, single)}: start {start:.2f}s is past the video's end ({c.source_duration:.2f}s)."
             )
             lengths[c.id] = None
             known = False
@@ -105,17 +121,19 @@ def validate_project(project: Project, require_sources: bool = False) -> Validat
             lengths[c.id] = None
             known = False
             if require_sources:
-                errors.append(f"{_label(c)}: video not downloaded yet.")
+                errors.append(f"{_label(c, single)}: video not downloaded yet.")
             continue
         if end <= start:
-            errors.append(f"{_label(c)}: end ({end:.2f}s) must be after start ({start:.2f}s).")
+            errors.append(f"{_label(c, single)}: end ({end:.2f}s) must be after start ({start:.2f}s).")
             lengths[c.id] = None
             continue
         length = end - start
         lengths[c.id] = round(length, 3)
         total += length
+        if single:
+            continue
         if length > SINGLE_CLIP_WARN:
-            warnings.append(f"{_label(c)} is {length:.1f}s; trend clips are short (3-7s).")
+            warnings.append(f"{_label(c, single)} is {length:.1f}s; trend clips are short (3-7s).")
         if not c.name.strip():
             hints.append(f"#{c.rank} has no name.")
 
@@ -124,7 +142,7 @@ def validate_project(project: Project, require_sources: bool = False) -> Validat
     over = total > project.max_seconds_warning
     if over:
         warnings.append(f"Total {total:.1f}s exceeds {project.max_seconds_warning:g}s")
-    elif total and known:
+    elif total and known and not single:
         if total < HINT_LOW:
             hints.append(f"Total {total:.1f}s is short; the sweet spot is {SWEET_MIN:g}-{SWEET_MAX:g}s.")
         elif total > HINT_HIGH:

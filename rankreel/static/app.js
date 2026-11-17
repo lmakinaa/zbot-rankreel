@@ -14,6 +14,9 @@ const emptyClip = (rank) => ({ id: uid(), url: "", start: "", end: "", rank, nam
 
 function freshState() {
   return {
+    format: "ranking", // or "single": one clip + post text under the channel card
+    caption: "",
+    stash: {}, // the other format's clips, kept while switching back and forth
     title: [
       { text: "RANKING", color: "#FFFFFF" }, { text: "THE", color: "#FFFFFF" },
       { text: "FUNNIEST", color: "#FFD400" }, { text: "MOMENTS", color: "#FF3B30" },
@@ -26,7 +29,7 @@ function freshState() {
       rank_active_color: "#FFD400", title_uppercase: true, loudnorm: true,
       rank_font_size: 46, rank_spacing: 78, rank_stroke: 5,
       channel_card: false, channel_name: "RankCracker", channel_handle: "@RankCracker",
-      channel_verified: true, channel_avatar: DEFAULT_AVATAR,
+      channel_verified: true, channel_avatar: DEFAULT_AVATAR, text_shade: true,
     },
   };
 }
@@ -42,6 +45,10 @@ function load() {
     if (!raw) return null;
     const s = JSON.parse(raw);
     if (!Array.isArray(s.clips) || !Array.isArray(s.title)) return null;
+    s.format = s.format === "single" ? "single" : "ranking";
+    s.caption = typeof s.caption === "string" ? s.caption : "";
+    s.stash = s.stash && typeof s.stash === "object" ? s.stash : {};
+    for (const k of Object.keys(s.stash)) for (const c of s.stash[k].clips || []) c.loading = false;
     // Older saves lack newer options; fill them in without adding a sound they didn't pick.
     s.style = compactRanks({ ...freshState().style, transition_sfx: "", ...(s.style || {}) });
     return s;
@@ -103,10 +110,11 @@ async function api(path, body, method = body ? "POST" : "GET") {
 function clientErrors() {
   const errs = [];
   for (const c of state.clips) {
-    if (!isUrl(c.url)) errs.push(`#${c.rank}: paste a TikTok or Instagram Reel link.`);
-    else if (!c.meta) errs.push(`#${c.rank}: click Fetch to download the clip.`);
-    if (Number.isNaN(parseTime(c.start))) errs.push(`#${c.rank}: invalid start time "${c.start}".`);
-    if (Number.isNaN(parseTime(c.end))) errs.push(`#${c.rank}: invalid end time "${c.end}".`);
+    const who = state.format === "single" ? "Clip" : `#${c.rank}`;
+    if (!isUrl(c.url)) errs.push(`${who}: paste a TikTok or Instagram Reel link.`);
+    else if (!c.meta) errs.push(`${who}: click Fetch to download the clip.`);
+    if (Number.isNaN(parseTime(c.start))) errs.push(`${who}: invalid start time "${c.start}".`);
+    if (Number.isNaN(parseTime(c.end))) errs.push(`${who}: invalid end time "${c.end}".`);
   }
   return errs;
 }
@@ -115,6 +123,8 @@ function clientErrors() {
 function toProject() {
   const num = (v) => { const t = parseTime(v); return Number.isNaN(t) ? null : t; };
   return {
+    format: state.format,
+    caption: state.format === "single" ? state.caption : "",
     title: state.title.filter((t) => t.text.trim()),
     clips: state.clips.map((c) => ({
       id: c.id,
@@ -176,6 +186,61 @@ titleInput.addEventListener("input", () => {
     return { text: w, color: sameCount ? old[i].color : "#FFFFFF" };
   });
   changed();
+});
+
+// ------------------------------------------------------------------ format + post text
+function renderFormat() {
+  document.body.classList.toggle("single", state.format === "single");
+  document.querySelectorAll("[data-format]").forEach((b) => {
+    const on = b.dataset.format === state.format;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", String(on));
+  });
+  const cap = $("#captionInput");
+  if (document.activeElement !== cap) cap.value = state.caption;
+}
+
+/** Switch format; each format keeps its own clips, so switching back restores them. */
+function setFormat(f) {
+  if (state.format === f) return;
+  stopPlayAll();
+  state.stash = state.stash || {};
+  state.stash[state.format] = { clips: state.clips, playOrder: state.playOrder };
+  const back = state.stash[f];
+  delete state.stash[f];
+  if (back?.clips?.length) {
+    state.clips = back.clips;
+    state.playOrder = back.playOrder;
+  } else if (f === "single") {
+    state.clips = [emptyClip(1)];
+    state.playOrder = [1];
+  } else {
+    state.clips = [1, 2, 3, 4, 5].map(emptyClip);
+    state.playOrder = [5, 4, 3, 2, 1];
+  }
+  state.format = f;
+  if (f === "single") state.style.channel_card = true; // the post look needs the card
+  previewStep = -1;
+  changed();
+}
+document.querySelectorAll("[data-format]").forEach((b) => b.addEventListener("click", () => setFormat(b.dataset.format)));
+
+$("#captionInput").addEventListener("input", (e) => { state.caption = e.target.value; changed({ clips: false }); });
+document.querySelectorAll("#captionColors [data-color]").forEach((b) => {
+  const color = b.dataset.color;
+  b.addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection
+  b.addEventListener("click", () => {
+    const ta = $("#captionInput");
+    const [a, z] = [ta.selectionStart, ta.selectionEnd];
+    const picked = ta.value.slice(a, z);
+    const sel = picked.trim();
+    if (!sel || /[{}\n]/.test(sel)) { ta.focus(); return; }
+    const lead = picked.match(/^\s*/)[0];
+    const trail = picked.slice(lead.length + sel.length);
+    ta.setRangeText(`${lead}{${color}:${sel}}${trail}`, a, z, "end");
+    state.caption = ta.value;
+    changed({ clips: false });
+  });
 });
 
 // ------------------------------------------------------------------ clips
@@ -447,6 +512,7 @@ function renderStyle() {
   opt.active.value = state.style.rank_active_color;
   opt.upper.checked = state.style.title_uppercase;
   opt.loud.checked = state.style.loudnorm;
+  $("#optShade").checked = state.style.text_shade !== false;
   const st = state.style;
   $("#optCard").checked = !!st.channel_card;
   $("#cardOpts").classList.toggle("off", !st.channel_card);
@@ -457,6 +523,7 @@ function renderStyle() {
   applyPreviewFit();
 }
 opt.fit.addEventListener("change", () => { state.style.fit = opt.fit.value; changed(); });
+$("#optShade").addEventListener("change", (e) => { state.style.text_shade = e.target.checked; changed(); });
 $("#optCard").addEventListener("change", (e) => { state.style.channel_card = e.target.checked; changed(); });
 $("#optCardVerified").addEventListener("change", (e) => { state.style.channel_verified = e.target.checked; changed(); });
 $("#optCardName").addEventListener("change", (e) => { state.style.channel_name = e.target.value.trim(); changed(); });
@@ -655,7 +722,7 @@ function renderStepButtons() {
 
 async function overlayUrl(step) {
   const project = toProject();
-  const key = JSON.stringify([project.title, project.clips.map((c) => [c.rank, c.name]), project.play_order, project.style, step]);
+  const key = JSON.stringify([project.format, project.caption, project.title, project.clips.map((c) => [c.rank, c.name]), project.play_order, project.style, step]);
   if (overlayCache.has(key)) return overlayCache.get(key);
   const res = await api("/api/preview-overlay", { project, step });
   const url = URL.createObjectURL(await res.blob());
@@ -931,7 +998,10 @@ $("#importForm").addEventListener("submit", async (e) => {
 function fromProject(p) {
   const base = freshState();
   return {
-    title: p.title,
+    format: p.format === "single" ? "single" : "ranking",
+    caption: p.caption || "",
+    stash: {},
+    title: p.title || [],
     clips: p.clips.map((c) => ({
       id: c.id || uid(), url: c.url, rank: c.rank, name: c.name || "",
       start: c.start != null ? fmtTime(c.start) : "", end: c.end != null ? fmtTime(c.end) : "", meta: null,
@@ -962,7 +1032,8 @@ async function refetchQuietly(c) {
   if (el) fetchClip(c, el); else setTimeout(() => refetchQuietly(c), 50);
 }
 $("#saveBtn").addEventListener("click", async () => {
-  const suggested = state.title.map((t) => t.text).join(" ").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
+  const named = state.format === "single" ? state.caption.replace(/\{\s*#[0-9a-fA-F]{3,6}\s*:|[{}]/g, "") : state.title.map((t) => t.text).join(" ");
+  const suggested = named.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
   const raw = prompt("Project name:", suggested);
   if (!raw) return;
   const name = raw.normalize("NFKD").replace(/[^\x00-\x7f]/g, "").replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toLowerCase().slice(0, 64) || "project";
@@ -986,6 +1057,7 @@ $("#newBtn").addEventListener("click", () => {
 // ------------------------------------------------------------------ wiring
 function changed({ clips = true } = {}) {
   persist();
+  renderFormat();
   renderTitle();
   if (clips) renderClips();
   renderOrder();

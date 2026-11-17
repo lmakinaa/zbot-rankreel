@@ -78,3 +78,19 @@ def test_end_hold_counts(project_factory):
     p = project_factory(n=3)
     p.style.end_hold_seconds = 0.3
     assert validate_project(p).total_seconds == 15.3
+
+
+def test_single_format_rules():
+    from app.models import Project
+
+    def mk(n=1, caption="A fact.", end=20):
+        return Project(format="single", caption=caption, clips=[
+            {"url": f"https://www.tiktok.com/@a/video/{i}", "rank": i, "start": 0, "end": end, "source_duration": 30}
+            for i in range(1, n + 1)])
+
+    r = validate_project(mk())
+    assert r.ok and not r.warnings and not r.hints  # 20s clip, no name: fine for a single clip
+    assert any("one clip" in e for e in validate_project(mk(n=2)).errors)
+    assert any("Add the text" in h for h in validate_project(mk(caption="  ")).hints)
+    assert any("too long" in w for w in validate_project(mk(caption=" ".join(["longword"] * 66))).warnings)
+    assert mk(caption="Cats {#FFD400:rule}!").name_text() == "Cats rule!"

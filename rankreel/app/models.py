@@ -75,6 +75,7 @@ class Style(BaseModel):
     fit: Literal["cover", "blur", "contain", "crop"] = "cover"
     background: str = "#000000"
     font_path: str = "assets/fonts/Montserrat-Black.ttf"
+    text_font_path: str = "assets/fonts/Montserrat-Bold.ttf"  # the single-clip post text
     transition_sfx: str | None = None  # file name (or path) in assets/sfx
     sfx_volume: float = Field(default=0.8, ge=0, le=4)
     loudnorm: bool = True
@@ -89,6 +90,7 @@ class Style(BaseModel):
     channel_handle: str = Field(default="@RankCracker", max_length=40)
     channel_verified: bool = True
     channel_avatar: str | None = "rankcracker.jpg"  # file name in assets/brand (or a path)
+    text_shade: bool = True  # single clip: soft dark gradient behind the card + text
 
     @field_validator("rank_color", "rank_active_color", "background")
     @classmethod
@@ -118,7 +120,11 @@ class Style(BaseModel):
 
 
 class Project(BaseModel):
-    title: list[TitleToken]
+    # "ranking": the title + rank list over several clips.
+    # "single": one clip with a post-style text (a fact, a caption) under the channel card.
+    format: Literal["ranking", "single"] = "ranking"
+    title: list[TitleToken] = Field(default_factory=list)
+    caption: str = Field(default="", max_length=600)  # single format; {#hex:words} colors words
     clips: list[Clip]
     play_order: list[int] = Field(default_factory=list)  # ranks in playback order
     style: Style = Field(default_factory=Style)
@@ -148,6 +154,12 @@ class Project(BaseModel):
     def title_text(self) -> str:
         return " ".join(t.text for t in self.title)
 
+    def name_text(self) -> str:
+        """Short text naming the video (output file name)."""
+        if self.format == "single":
+            return caption_plain(self.caption) or self.title_text()
+        return self.title_text()
+
 
 # ---------------------------------------------------------------------------
 # Title markup:  RANKING {#FFD400:FUNNIEST} {#FF3B30:MOMENTS} 😭
@@ -173,6 +185,11 @@ def parse_title_markup(markup: str, default_color: str = "#FFFFFF") -> list[Titl
         raise ValueError(f"Malformed title markup near: {rest.strip()!r}")
     tokens += [TitleToken(text=w, color=default_color) for w in rest.split()]
     return tokens
+
+
+def caption_plain(caption: str) -> str:
+    """Post text without the {#hex: ...} color markup."""
+    return " ".join(re.sub(r"\{\s*#[0-9a-fA-F]{3,6}\s*:|[{}]", "", caption).split())
 
 
 def tokens_to_markup(tokens: list[TitleToken], default_color: str = "#FFFFFF") -> str:

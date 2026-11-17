@@ -194,3 +194,58 @@ def test_channel_card_missing_avatar_falls_back(project_factory, tmp_path):
     from app.overlay import overlay_key
     q = project_factory(style={"channel_card": True})
     assert overlay_key(p, 0) != overlay_key(q, 0)
+
+
+# --------------------------------------------------------------------------- single clip + text
+def _single(caption="Cats can remember a puzzle for {#FFD400:10 years}.", **style):
+    from app.models import Project
+
+    return Project(format="single", caption=caption,
+                   clips=[{"url": "https://www.tiktok.com/@a/video/1", "rank": 1, "start": 0, "end": 5,
+                           "source_duration": 9}],
+                   style={"channel_card": True, **style})
+
+
+def test_single_has_card_and_text_but_no_title_or_ranks():
+    img = render_overlay(_single(), 0)
+    # Nothing below the text area: no rank list.
+    assert img.crop((0, 1000, 1080, 1920)).getbbox() is None
+    # Yellow words are drawn; the ranking title colours aren't.
+    cols = _colors(img, (0, 0, 1080, 1000))
+    assert YELLOW in cols and (0xFF, 0x3B, 0x30) not in cols
+    # Card is left-aligned like a post: ink starts at the left margin.
+    from app.overlay import CARD_AVATAR, CARD_TOP
+    band = img.getchannel("A").crop((0, CARD_TOP, 1080, CARD_TOP + CARD_AVATAR))
+    assert band.point(lambda a: 255 if a == 255 else 0).getbbox()[0] < 70
+
+
+def test_post_punctuation_sticks_to_colored_word():
+    from app.overlay import post_paragraphs, text_font_path
+
+    fp = text_font_path(_single().style)
+    (line,) = post_paragraphs("up to {#FFD400:10 years}. Wow", fp)
+    assert [ "".join(t for t, _ in w) for w in line] == ["up", "to", "10", "years.", "Wow"]
+    assert line[3] == [("years", "#FFD400"), (".", "#FFFFFF")]
+    # Line breaks are kept; stray braces don't crash.
+    paras = post_paragraphs("one\n\ntwo {oops", fp)
+    assert len(paras) == 3 and paras[1] == [] and "".join(t for t, _ in paras[2][1]) == "{oops"
+
+
+def test_post_text_shrinks_then_cuts():
+    from app.overlay import POST_SIZE_MAX, POST_SIZE_MIN, layout_post, post_is_cut, post_top, text_font_path
+
+    p = _single("short")
+    fp = text_font_path(p.style)
+    size, lines, cut = layout_post("short", p.style, fp, post_top(p.style))
+    assert size == POST_SIZE_MAX and not cut
+    medium = " ".join(["word"] * 60)
+    size, _, cut = layout_post(medium, p.style, fp, post_top(p.style))
+    assert POST_SIZE_MIN <= size < POST_SIZE_MAX and not cut
+    long = " ".join(["longword"] * 66)
+    assert post_is_cut(_single(long)) and not post_is_cut(_single(medium))
+
+
+def test_single_overlay_key_tracks_caption():
+    from app.overlay import overlay_key
+
+    assert overlay_key(_single("a"), 0) != overlay_key(_single("b"), 0)

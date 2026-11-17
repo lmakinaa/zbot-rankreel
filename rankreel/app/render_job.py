@@ -48,6 +48,9 @@ def credits_text(project: Project) -> str:
         parts.append(f"{who} ({c.webpage_url or c.url})")
     lines = ["Clips: " + ", ".join(parts), ""]
     for c in sorted(project.clips, key=lambda c: c.rank):
+        if project.format == "single":
+            lines.append(f"{c.creator or 'unknown creator'} - {c.webpage_url or c.url}")
+            continue
         lines.append(f"#{c.rank} {c.name} - {c.creator or 'unknown creator'} - {c.webpage_url or c.url}")
     return "\n".join(lines) + "\n"
 
@@ -65,7 +68,7 @@ def run_render(project: Project, progress=None, out_dir: Path = OUTPUT_DIR,
         raise RenderError("Fix these first:\n- " + "\n- ".join(result.errors))
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base = f"{slugify(project.title_text())}_{stamp}"
+    base = f"{slugify(project.name_text(), 40)}_{stamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
     video = out_dir / f"{base}.mp4"
     work = WORK_DIR / (job_id or uuid.uuid4().hex[:10])

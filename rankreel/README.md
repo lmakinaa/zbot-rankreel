@@ -42,6 +42,19 @@ It only listens on 127.0.0.1.
 5. **Preview.** The phone frame shows each step's overlay over its clip. **▶ Play preview** plays the trimmed clips in order.
 6. **Render.** Watch progress, then download the MP4 and copy the credits.
 
+**Formats.** Pick one at the top of the editor:
+
+- **Ranking** is everything above.
+- **Single clip + text** is one clip with your channel card at the top (avatar, name, verified check, @handle) and a text under it, laid out like a post. Use it for a fact or a caption about the clip.
+  - Line breaks are kept. Color words with `{#FFD400:these words}`, or select them and click a color dot.
+  - Long text shrinks to fit the top half. If it still doesn't fit, the end is cut and you get a warning.
+  - **Darken behind the text** adds a soft gradient so the text stays readable on bright footage.
+  - Switching formats keeps each format's clips, so you can go back and forth.
+
+In project JSON this is `"format": "single"` with a `"caption"`.
+
+**Channel card.** Under Style → **Channel card** you can show it in rankings too: it goes centred above the title. You can change the name, the handle, the verified check and the avatar. The RankCracker avatar is `assets/brand/rankcracker.jpg`.
+
 The total duration updates live. It turns red with "Over 40s — trim clips" above 40s (a warning, not a block). You also get hints under 20s or over 35s (the sweet spot is 27–35s), and a warning for any clip over 8s.
 
 Your work is kept in the browser's localStorage. **Save** writes it to `projects/`, and **Load project…** reopens it. Every render also saves its project JSON next to the output name.
