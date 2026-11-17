@@ -53,6 +53,13 @@ It only listens on 127.0.0.1.
 
 In project JSON this is `"format": "single"` with a `"caption"`.
 
+**Crop.** Every clip, in either format, has a **✂ Crop** button next to the trim buttons. Its sliders cut 0–45% off the top, bottom, left and right. Use it for burned-in captions, borders or a watermark at the edge.
+
+- The thumbnail frames what's kept, and the phone preview shows the result.
+- **Fill 9:16** trims the sides so the clip fills the screen.
+- Cropping happens before **Fit**. If what's left isn't close to 9:16, smart fill still shows it whole on a blurred background.
+- In JSON: `"crop": {"top": 0.1, "left": 0.2, "right": 0.2}` (shares of the source, 0–0.45).
+
 **Channel card.** Under Style → **Channel card** you can show it in rankings too: it goes centred above the title. You can change the name, the handle, the verified check and the avatar. The RankCracker avatar is `assets/brand/rankcracker.jpg`.
 
 The total duration updates live. It turns red with "Over 40s — trim clips" above 40s (a warning, not a block). You also get hints under 20s or over 35s (the sweet spot is 27–35s), and a warning for any clip over 8s.

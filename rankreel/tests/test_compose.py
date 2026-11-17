@@ -323,3 +323,29 @@ def test_probe_reports_displayed_size_of_rotated_video(tmp_path):
                     "-c", "copy", str(rotated)], check=True)
     info = probe(rotated)
     assert (info.width, info.height) == (180, 320)
+
+
+def test_clip_crop_cuts_edges_before_fitting(tmp_path):
+    """Cropping a square to ~9:16 removes the edge stripes and lets smart fill fill the frame."""
+    src = _edge_striped_square(tmp_path / "sq.mp4")
+    p = Project.model_validate({
+        "title": "T", "play_order": [1],
+        "clips": [{"url": "https://www.instagram.com/reel/abc/", "rank": 1, "start": 0, "end": 2,
+                   "local_path": str(src), "crop": {"left": 0.21875, "right": 0.21875}}],
+    })
+    out = compose(p, tmp_path / "o.mp4", tmp_path / "w")
+    for x, y in ((2, 1300), (1074, 1300), (540, 1800), (540, 60)):
+        r, g, b = _pixel(out, x, y)
+        assert r > 150 and g < 90, ((x, y), (r, g, b))  # red footage everywhere: no stripes, no backdrop
+
+
+def test_crop_rect_is_even_and_inside():
+    from app.models import Crop
+
+    assert Crop(left=0.1, top=0.05, bottom=0.3).rect(720, 1280) == (648, 832, 72, 64)
+    w, h, x, y = Crop(left=0.45, right=0.45).rect(101, 99)
+    assert w % 2 == 0 and h % 2 == 0 and x + w <= 101 and y + h <= 99
+    from app.models import Clip
+    assert Clip(url="https://www.tiktok.com/@a/video/1", rank=1, crop={"top": 0}).crop is None
+    with pytest.raises(Exception):
+        Crop(top=0.6)

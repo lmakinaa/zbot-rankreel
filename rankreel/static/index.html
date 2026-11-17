@@ -243,7 +243,7 @@
       <button class="btn fetch">Fetch</button>
     </div>
     <div class="clip-body">
-      <div class="thumb" hidden><video class="cv" playsinline preload="metadata" controls></video></div>
+      <div class="thumb" hidden><video class="cv" playsinline preload="metadata" controls></video><div class="crop-mark" hidden></div></div>
       <div class="trim">
         <div class="trim-row">
           <label>Start <input class="input ts start" placeholder="0:00"></label>
@@ -254,6 +254,17 @@
           <button class="btn small set-start">Start = now</button>
           <button class="btn small set-end">End = now</button>
           <button class="btn small play-trim">▶ Trim</button>
+          <button class="btn small crop-toggle" aria-expanded="false">✂ Crop</button>
+        </div>
+        <div class="crop-panel" hidden>
+          <label>Top <input type="range" class="crop-in" data-edge="top" min="0" max="45" step="1" value="0"><output>0%</output></label>
+          <label>Bottom <input type="range" class="crop-in" data-edge="bottom" min="0" max="45" step="1" value="0"><output>0%</output></label>
+          <label>Left <input type="range" class="crop-in" data-edge="left" min="0" max="45" step="1" value="0"><output>0%</output></label>
+          <label>Right <input type="range" class="crop-in" data-edge="right" min="0" max="45" step="1" value="0"><output>0%</output></label>
+          <div class="crop-actions">
+            <button class="btn small ghost crop-916" title="Cut the sides so the clip is 9:16 and fills the screen">Fill 9:16</button>
+            <button class="btn small ghost crop-reset">Reset</button>
+          </div>
         </div>
         <div class="meta muted small"></div>
         <div class="status small"></div>

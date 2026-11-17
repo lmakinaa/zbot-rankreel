@@ -55,6 +55,7 @@ class SegmentSpec:
     tx_in: bool = False  # play the transition at the start of this segment
     tx_out: bool = False  # "fade" only: dip to black at the end of this segment
     sfx_pieces: list[SfxPiece] = field(default_factory=list)
+    crop: tuple[int, int, int, int] | None = None  # (w, h, x, y) of the source kept
 
     @property
     def duration(self) -> float:
@@ -183,7 +184,8 @@ def segment_command(seg: SegmentSpec, style: Style, out: Path) -> list[str]:
         next_input += 1
 
     hold = f",tpad=stop_mode=clone:stop_duration={seg.hold:.3f}" if seg.hold > 0 else ""
-    video = (f"[0:v]fps={fps}[vsrc];{fit_graph(style, seg, '[vsrc]', '[vfit0]')};"
+    crop = f",crop={seg.crop[0]}:{seg.crop[1]}:{seg.crop[2]}:{seg.crop[3]}" if seg.crop else ""
+    video = (f"[0:v]fps={fps}{crop}[vsrc];{fit_graph(style, seg, '[vsrc]', '[vfit0]')};"
              f"[vfit0]setsar=1[vfit];"
              f"{transition_graph(seg, style, '[vfit]', '[v]')};"
              f"[v][1:v]overlay=0:0:shortest=1,format=yuv420p{hold}[vout]")
@@ -261,12 +263,16 @@ def plan_segments(project: Project, cache_dir: Path | None = None) -> list[Segme
         if end is None or end <= start:
             raise ComposeError(f"#{rank}: invalid trim {start}..{end}.")
         ov = overlay_png(project, i, cache_dir) if cache_dir else overlay_png(project, i)
+        src_w, src_h, crop = info.width, info.height, None
+        if clip.crop and src_w and src_h:
+            crop = clip.crop.rect(src_w, src_h)
+            src_w, src_h = crop[0], crop[1]  # fit decisions use what's left after the crop
         specs.append(SegmentSpec(
             clip=clip, overlay=ov, start=start, length=end - start,
             hold=style.end_hold_seconds if i == len(order) - 1 else 0.0,
             has_audio=info.has_audio,
             sfx=sfx,
-            src_w=info.width, src_h=info.height,
+            src_w=src_w, src_h=src_h, crop=crop,
             tx_in=style.transition != "none" and i > 0,
             tx_out=style.transition == "fade" and i < len(order) - 1,
         ))

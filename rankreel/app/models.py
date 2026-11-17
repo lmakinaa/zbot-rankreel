@@ -32,6 +32,26 @@ class TitleToken(BaseModel):
         return _check_hex(v)
 
 
+class Crop(BaseModel):
+    """Share of the source cut off each edge (0.1 = 10%), before the video is fitted."""
+    top: float = Field(default=0.0, ge=0, le=0.45)
+    bottom: float = Field(default=0.0, ge=0, le=0.45)
+    left: float = Field(default=0.0, ge=0, le=0.45)
+    right: float = Field(default=0.0, ge=0, le=0.45)
+
+    def is_zero(self) -> bool:
+        return not (self.top or self.bottom or self.left or self.right)
+
+    def rect(self, w: int, h: int) -> tuple[int, int, int, int]:
+        """(width, height, x, y) in even pixels for a w x h source."""
+        even = lambda v: max(2, int(round(v / 2)) * 2)
+        cw = min(even(w * (1 - self.left - self.right)), w - w % 2)
+        ch = min(even(h * (1 - self.top - self.bottom)), h - h % 2)
+        x = min(int(round(w * self.left / 2)) * 2, w - cw)
+        y = min(int(round(h * self.top / 2)) * 2, h - ch)
+        return cw, ch, max(0, x), max(0, y)
+
+
 class Clip(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])
     url: HttpUrl
@@ -39,6 +59,7 @@ class Clip(BaseModel):
     end: float | None = None
     rank: int = Field(ge=1)  # 1 = best
     name: str = ""
+    crop: Crop | None = None  # cut off the edges (e.g. burned-in captions, borders)
     # filled after download:
     local_path: str | None = None
     source_duration: float | None = None
@@ -49,6 +70,11 @@ class Clip(BaseModel):
     @classmethod
     def _parse_ts(cls, v):
         return parse_time(v)
+
+    @field_validator("crop")
+    @classmethod
+    def _no_empty_crop(cls, v):
+        return None if v is None or v.is_zero() else v
 
 
 class Style(BaseModel):

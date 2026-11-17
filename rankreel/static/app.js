@@ -133,6 +133,7 @@ function toProject() {
       end: num(c.end),
       rank: c.rank,
       name: c.name,
+      crop: cropActive(c.crop) ? cropOf(c) : null,
       source_duration: c.meta?.duration ?? null,
     })),
     play_order: state.playOrder,
@@ -299,6 +300,38 @@ function buildClip(c) {
   $(".set-start", el).addEventListener("click", () => { const c = get(); c.start = fmtTime(video.currentTime); changed(); });
   $(".set-end", el).addEventListener("click", () => { const c = get(); c.end = fmtTime(video.currentTime); changed(); });
   $(".play-trim", el).addEventListener("click", () => playTrim(get(), video));
+  $(".crop-toggle", el).addEventListener("click", () => {
+    const panel = $(".crop-panel", el);
+    panel.hidden = !panel.hidden;
+    $(".crop-toggle", el).setAttribute("aria-expanded", String(!panel.hidden));
+    if (!panel.hidden) previewClip(get());
+    updateClip(el, get());
+  });
+  for (const edge of CROP_EDGES) $(`.crop-in[data-edge="${edge}"]`, el).addEventListener("input", (e) => {
+    const inp = e.target;
+    const c = get();
+    c.crop = { ...(c.crop || {}), [inp.dataset.edge]: +inp.value / 100 };
+    if (!cropActive(c.crop)) c.crop = null;
+    changed({ clips: false });
+    updateClip(el, c);
+    if (pvClipId !== c.id) previewClip(c);
+    layoutPreview();
+  });
+  $(".crop-reset", el).addEventListener("click", () => { const c = get(); c.crop = null; changed(); layoutPreview(); });
+  $(".crop-916", el).addEventListener("click", () => {
+    const c = get();
+    const w = video.videoWidth, h = video.videoHeight;
+    if (!w || !h) return;
+    const cur = c.crop || {};
+    const ch = h * (1 - (cur.top || 0) - (cur.bottom || 0));
+    const side = Math.max(0, Math.min(0.45, (1 - (ch * 9 / 16) / w) / 2));
+    c.crop = { ...cur, left: Math.round(side * 1000) / 1000, right: Math.round(side * 1000) / 1000 };
+    if (!cropActive(c.crop)) c.crop = null;
+    changed();
+    previewClip(c);
+    layoutPreview();
+  });
+  video.addEventListener("loadedmetadata", () => updateClip(el, get()));
   return el;
 }
 
@@ -325,6 +358,18 @@ function updateClip(el, c) {
     video.dataset.src = c.meta.preview_url;
     video.src = c.meta.preview_url;
   }
+  // crop: sliders, summary on the button, and a frame on the thumbnail
+  const crop = c.crop || {};
+  for (const edge of CROP_EDGES) {
+    const inp = $(`.crop-in[data-edge="${edge}"]`, el);
+    const pct = Math.round((crop[edge] || 0) * 100);
+    if (document.activeElement !== inp) inp.value = pct;
+    inp.nextElementSibling.textContent = `${pct}%`;
+  }
+  const on = cropActive(c.crop);
+  $(".crop-toggle", el).classList.toggle("on", on);
+  $(".crop-toggle", el).textContent = on ? "✂ Cropped" : "✂ Crop";
+  markCrop($(".crop-mark", el), video, on ? crop : null);
   $(".meta", el).textContent = fetched
     ? `${c.meta.creator || "unknown creator"} · ${fmtTime(c.meta.duration)} long${c.meta.has_audio ? "" : " · no audio"}`
     : "";
@@ -737,6 +782,8 @@ async function showStep(step) {
   const gen = ++overlayGen;
   const rank = step >= 0 ? state.playOrder[step] : state.playOrder[0];
   const c = clipByRank(rank);
+  pvClipId = c?.id ?? null;
+  layoutPreview();
   $("#pvEmpty").hidden = !!c?.meta;
   if (c?.meta) {
     if (pv.dataset.src !== c.meta.preview_url) { pv.dataset.src = c.meta.preview_url; pv.src = c.meta.preview_url; }
@@ -747,6 +794,34 @@ async function showStep(step) {
     const url = await overlayUrl(step);
     if (gen === overlayGen) pvOverlay.src = url;
   } catch { /* validation shows the error */ }
+}
+
+// ---- crop helpers
+const CROP_EDGES = ["top", "bottom", "left", "right"];
+function cropActive(cr) { return !!cr && CROP_EDGES.some((k) => (cr[k] || 0) > 0); }
+function cropOf(c) {
+  const cr = c?.crop || {};
+  return { top: cr.top || 0, bottom: cr.bottom || 0, left: cr.left || 0, right: cr.right || 0 };
+}
+/** Frame the kept area on a clip's thumbnail (object-fit: contain inside a 9:16 box). */
+function markCrop(mark, video, crop) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!crop || !vw || !vh) { mark.hidden = true; return; }
+  const BW = video.clientWidth, BH = video.clientHeight;
+  const s = Math.min(BW / vw, BH / vh);
+  const dw = vw * s, dh = vh * s, dx = (BW - dw) / 2, dy = (BH - dh) / 2;
+  const cr = cropOf({ crop });
+  Object.assign(mark.style, {
+    left: `${dx + cr.left * dw}px`, top: `${dy + cr.top * dh}px`,
+    width: `${dw * (1 - cr.left - cr.right)}px`, height: `${dh * (1 - cr.top - cr.bottom)}px`,
+  });
+  mark.hidden = false;
+}
+let pvClipId = null;
+/** Show this clip in the phone preview (e.g. while cropping it). */
+function previewClip(c) {
+  const i = state.playOrder.indexOf(c.rank);
+  if (i >= 0 && !playing) showStep(i);
 }
 
 // ---- preview fit: mirrors effective_fit() in app/compose.py
@@ -761,11 +836,27 @@ function effectiveFit(w, h) {
   return 1 - Math.min(src, dst) / Math.max(src, dst) <= MAX_FILL_CROP ? "crop" : "blur";
 }
 
-function applyPreviewFit() {
-  const mode = effectiveFit(pv.videoWidth, pv.videoHeight);
+function applyPreviewFit() { layoutPreview(); }
+
+/** Place the preview video like the render does: crop the clip's edges, then fit what's
+ *  left (fill, or whole on a blurred/black background). */
+function layoutPreview() {
   const phone = $("#phone");
+  const vw = pv.videoWidth, vh = pv.videoHeight;
+  const cr = cropOf(state.clips.find((x) => x.id === pvClipId));
+  const cw = vw * (1 - cr.left - cr.right), ch = vh * (1 - cr.top - cr.bottom);
+  const mode = effectiveFit(cw, ch);
   phone.classList.toggle("whole", mode !== "crop");
   phone.classList.toggle("blur", mode === "blur");
+  const PW = phone.clientWidth, PH = phone.clientHeight;
+  if (!vw || !vh || !PW) { pv.removeAttribute("style"); return; }
+  const s = mode === "crop" ? Math.max(PW / cw, PH / ch) : Math.min(PW / cw, PH / ch);
+  Object.assign(pv.style, {
+    objectFit: "fill", right: "auto", bottom: "auto",
+    width: `${vw * s}px`, height: `${vh * s}px`,
+    left: `${PW / 2 - (vw * cr.left + cw / 2) * s}px`, top: `${PH / 2 - (vh * cr.top + ch / 2) * s}px`,
+    clipPath: `inset(${cr.top * 100}% ${cr.right * 100}% ${cr.bottom * 100}% ${cr.left * 100}%)`,
+  });
   if (mode === "blur") paintBackdrop();
 }
 
@@ -774,9 +865,12 @@ function paintBackdrop() {
   if (!pv.videoWidth) return;
   const ctx = pvBg.getContext("2d");
   const W = pvBg.width, H = pvBg.height;
-  const s = Math.max(W / pv.videoWidth, H / pv.videoHeight);
-  const w = pv.videoWidth * s, h = pv.videoHeight * s;
-  try { ctx.drawImage(pv, (W - w) / 2, (H - h) / 2, w, h); } catch { /* frame not ready */ }
+  const cr = cropOf(state.clips.find((x) => x.id === pvClipId));
+  const sx = pv.videoWidth * cr.left, sy = pv.videoHeight * cr.top;
+  const sw = pv.videoWidth * (1 - cr.left - cr.right), sh = pv.videoHeight * (1 - cr.top - cr.bottom);
+  const s = Math.max(W / sw, H / sh);
+  const w = sw * s, h = sh * s;
+  try { ctx.drawImage(pv, sx, sy, sw, sh, (W - w) / 2, (H - h) / 2, w, h); } catch { /* frame not ready */ }
 }
 pv.addEventListener("loadedmetadata", applyPreviewFit);
 pv.addEventListener("seeked", () => $("#phone").classList.contains("blur") && paintBackdrop());
@@ -1003,7 +1097,7 @@ function fromProject(p) {
     stash: {},
     title: p.title || [],
     clips: p.clips.map((c) => ({
-      id: c.id || uid(), url: c.url, rank: c.rank, name: c.name || "",
+      id: c.id || uid(), url: c.url, rank: c.rank, name: c.name || "", crop: c.crop || null,
       start: c.start != null ? fmtTime(c.start) : "", end: c.end != null ? fmtTime(c.end) : "", meta: null,
     })),
     playOrder: p.play_order,
@@ -1055,6 +1149,7 @@ $("#newBtn").addEventListener("click", () => {
 });
 
 // ------------------------------------------------------------------ wiring
+window.addEventListener("resize", () => layoutPreview());
 function changed({ clips = true } = {}) {
   persist();
   renderFormat();
