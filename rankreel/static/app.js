@@ -29,7 +29,7 @@ function freshState() {
       rank_active_color: "#FFD400", title_uppercase: true, loudnorm: true,
       rank_font_size: 46, rank_spacing: 78, rank_stroke: 5,
       channel_card: false, channel_name: "RankCracker", channel_handle: "@RankCracker",
-      channel_verified: true, channel_avatar: DEFAULT_AVATAR, text_shade: true,
+      channel_verified: true, channel_avatar: DEFAULT_AVATAR,
     },
   };
 }
@@ -318,19 +318,17 @@ function buildClip(c) {
     layoutPreview();
   });
   $(".crop-reset", el).addEventListener("click", () => { const c = get(); c.crop = null; changed(); layoutPreview(); });
-  $(".crop-916", el).addEventListener("click", () => {
-    const c = get();
-    const w = video.videoWidth, h = video.videoHeight;
-    if (!w || !h) return;
-    const cur = c.crop || {};
-    const ch = h * (1 - (cur.top || 0) - (cur.bottom || 0));
-    const side = Math.max(0, Math.min(0.45, (1 - (ch * 9 / 16) / w) / 2));
-    c.crop = { ...cur, left: Math.round(side * 1000) / 1000, right: Math.round(side * 1000) / 1000 };
-    if (!cropActive(c.crop)) c.crop = null;
-    changed();
-    previewClip(c);
-    layoutPreview();
-  });
+  for (const ratio of ["9:16", "4:5", "1:1", "16:9"]) {
+    $(`.crop-ratio[data-ratio="${ratio}"]`, el).addEventListener("click", () => {
+      const c = get();
+      const crop = cropToRatio(video.videoWidth, video.videoHeight, ratio);
+      if (!crop) return;
+      c.crop = cropActive(crop) ? crop : null;
+      changed();
+      previewClip(c);
+      layoutPreview();
+    });
+  }
   video.addEventListener("loadedmetadata", () => updateClip(el, get()));
   return el;
 }
@@ -557,7 +555,6 @@ function renderStyle() {
   opt.active.value = state.style.rank_active_color;
   opt.upper.checked = state.style.title_uppercase;
   opt.loud.checked = state.style.loudnorm;
-  $("#optShade").checked = state.style.text_shade !== false;
   const st = state.style;
   $("#optCard").checked = !!st.channel_card;
   $("#cardOpts").classList.toggle("off", !st.channel_card);
@@ -568,7 +565,6 @@ function renderStyle() {
   applyPreviewFit();
 }
 opt.fit.addEventListener("change", () => { state.style.fit = opt.fit.value; changed(); });
-$("#optShade").addEventListener("change", (e) => { state.style.text_shade = e.target.checked; changed(); });
 $("#optCard").addEventListener("change", (e) => { state.style.channel_card = e.target.checked; changed(); });
 $("#optCardVerified").addEventListener("change", (e) => { state.style.channel_verified = e.target.checked; changed(); });
 $("#optCardName").addEventListener("change", (e) => { state.style.channel_name = e.target.value.trim(); changed(); });
@@ -746,7 +742,8 @@ function renderValidation() {
 // ------------------------------------------------------------------ preview
 const pv = $("#pv");
 const pvOverlay = $("#pvOverlay");
-const overlayCache = new Map(); // key -> objectURL
+const overlayCache = new Map(); // key -> { url: objectURL, box: [x, y, w, h] | null }
+let pvBox = null; // single clip: where the video sits in the 1080x1920 frame
 let overlayGen = 0;
 let playing = false;
 
@@ -767,13 +764,14 @@ function renderStepButtons() {
 
 async function overlayUrl(step) {
   const project = toProject();
-  const key = JSON.stringify([project.format, project.caption, project.title, project.clips.map((c) => [c.rank, c.name]), project.play_order, project.style, step]);
+  const key = JSON.stringify([project.format, project.caption, project.title, project.clips.map((c) => [c.rank, c.name, c.url, c.crop, c.source_duration]), project.play_order, project.style, step]);
   if (overlayCache.has(key)) return overlayCache.get(key);
   const res = await api("/api/preview-overlay", { project, step });
-  const url = URL.createObjectURL(await res.blob());
-  if (overlayCache.size > 40) { const [k, u] = overlayCache.entries().next().value; URL.revokeObjectURL(u); overlayCache.delete(k); }
-  overlayCache.set(key, url);
-  return url;
+  const box = (res.headers.get("X-Video-Box") || "").split(",").map(Number);
+  const ov = { url: URL.createObjectURL(await res.blob()), box: box.length === 4 && box.every(Number.isFinite) ? box : null };
+  if (overlayCache.size > 40) { const [k, o] = overlayCache.entries().next().value; URL.revokeObjectURL(o.url); overlayCache.delete(k); }
+  overlayCache.set(key, ov);
+  return ov;
 }
 
 async function showStep(step) {
@@ -791,8 +789,8 @@ async function showStep(step) {
     if (!playing) { pv.pause(); seek(pv, start); }
   } else { pv.removeAttribute("src"); pv.dataset.src = ""; pv.load(); }
   try {
-    const url = await overlayUrl(step);
-    if (gen === overlayGen) pvOverlay.src = url;
+    const ov = await overlayUrl(step);
+    if (gen === overlayGen) { pvOverlay.src = ov.url; pvBox = ov.box; layoutPreview(); }
   } catch { /* validation shows the error */ }
 }
 
@@ -816,6 +814,16 @@ function markCrop(mark, video, crop) {
     width: `${dw * (1 - cr.left - cr.right)}px`, height: `${dh * (1 - cr.top - cr.bottom)}px`,
   });
   mark.hidden = false;
+}
+/** Centred crop that gives the clip this shape ("4:5" etc.), or null if the size is unknown. */
+function cropToRatio(w, h, ratio) {
+  if (!w || !h) return null;
+  const [rw, rh] = ratio.split(":").map(Number);
+  const want = rw / rh, have = w / h;
+  const r3 = (v) => Math.round(Math.min(0.45, Math.max(0, v)) * 1000) / 1000;
+  if (have > want) { const side = r3((1 - want / have) / 2); return { top: 0, bottom: 0, left: side, right: side }; }
+  const tb = r3((1 - have / want) / 2);
+  return { top: tb, bottom: tb, left: 0, right: 0 };
 }
 let pvClipId = null;
 /** Show this clip in the phone preview (e.g. while cropping it). */
@@ -850,6 +858,20 @@ function layoutPreview() {
   phone.classList.toggle("blur", mode === "blur");
   const PW = phone.clientWidth, PH = phone.clientHeight;
   if (!vw || !vh || !PW) { pv.removeAttribute("style"); return; }
+  if (state.format === "single") {
+    // Reels-style: the (cropped) video exactly where the server's layout puts it.
+    phone.classList.remove("whole", "blur");
+    const k = PW / 1080;
+    const [bx, by, bw, bh] = pvBox || [0, (1920 - 1080 * ch / cw) / 2, 1080, 1080 * ch / cw];
+    const sx = (bw * k) / cw, sy = (bh * k) / ch;
+    Object.assign(pv.style, {
+      objectFit: "fill", right: "auto", bottom: "auto",
+      width: `${vw * sx}px`, height: `${vh * sy}px`,
+      left: `${bx * k - vw * cr.left * sx}px`, top: `${by * k - vh * cr.top * sy}px`,
+      clipPath: `inset(${cr.top * 100}% ${cr.right * 100}% ${cr.bottom * 100}% ${cr.left * 100}%)`,
+    });
+    return;
+  }
   const s = mode === "crop" ? Math.max(PW / cw, PH / ch) : Math.min(PW / cw, PH / ch);
   Object.assign(pv.style, {
     objectFit: "fill", right: "auto", bottom: "auto",

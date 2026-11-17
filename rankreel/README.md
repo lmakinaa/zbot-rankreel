@@ -45,10 +45,9 @@ It only listens on 127.0.0.1.
 **Formats.** Pick one at the top of the editor:
 
 - **Ranking** is everything above.
-- **Single clip + text** is one clip with your channel card at the top (avatar, name, verified check, @handle) and a text under it, laid out like a post. Use it for a fact or a caption about the clip.
+- **Single clip + text** is a reels-style video: black background, your text centred above one clip, and your channel card above the text if it's on. Use it for a fact or a caption about the clip. A wide or cropped clip spans the full width; a tall one is shown as large as fits.
   - Line breaks are kept. Color words with `{#FFD400:these words}`, or select them and click a color dot.
-  - Long text shrinks to fit the top half. If it still doesn't fit, the end is cut and you get a warning.
-  - **Darken behind the text** adds a soft gradient so the text stays readable on bright footage.
+  - Long text shrinks to fit. If it still doesn't fit, the end is cut and you get a warning.
   - Switching formats keeps each format's clips, so you can go back and forth.
 
 In project JSON this is `"format": "single"` with a `"caption"`.
@@ -56,7 +55,7 @@ In project JSON this is `"format": "single"` with a `"caption"`.
 **Crop.** Every clip, in either format, has a **✂ Crop** button next to the trim buttons. Its sliders cut 0–45% off the top, bottom, left and right. Use it for burned-in captions, borders or a watermark at the edge.
 
 - The thumbnail frames what's kept, and the phone preview shows the result.
-- **Fill 9:16** trims the sides so the clip fills the screen.
+- **Shape** buttons (9:16, 4:5, 1:1, 16:9) set a centred crop to that shape; fine-tune it with the sliders. In a ranking, 9:16 makes the clip fill the screen. In the single-clip format, use them to cut a reel's own bars, captions or reply bubble down to the real video.
 - Cropping happens before **Fit**. If what's left isn't close to 9:16, smart fill still shows it whole on a blurred background.
 - In JSON: `"crop": {"top": 0.1, "left": 0.2, "right": 0.2}` (shares of the source, 0–0.45).
 
@@ -92,7 +91,7 @@ Project JSON (see [examples/example_project.json](examples/example_project.json)
 
 ## Notes
 
-- **Emoji** aren't in the overlay font, so they're dropped from the burned-in title. Keep them in your YouTube title.
+- **Emoji** are drawn in color in the title, rank names, channel card and single-clip text, using a color emoji font: Noto Color Emoji on Linux, Apple Color Emoji on macOS or Segoe UI Emoji on Windows. To use another, put it at `assets/fonts/NotoColorEmoji.ttf` or set `"emoji_font"` in `config.json`. With no emoji font, emoji are left out.
 - **HEVC clips.** TikTok often serves H.265. The original is kept for rendering, and a small H.264 copy (`*.preview.mp4`) is made only for the in-browser preview.
 - **Default transition sound.** New projects use *Core sound effect* (`assets/sfx/core_sound_effect.wav`). It's prepared from your `core-sound-effect.mp3`: leading silence trimmed so the hit lands on the cut, ends de-clicked, level matched. To regenerate it: `.venv/bin/python -c "from pathlib import Path; from app.sfx_gen import prepare_sound; prepare_sound(Path('../core-sound-effect.mp3'), Path('assets/sfx/core_sound_effect.wav'))"`. If the file is missing, the app falls back to no sound.
 - **Sync.** The transition sound fits its transition: it starts when the effect starts (on the cut for flash/zoom/punch/slide/shake; when the screen starts darkening for dip to black) and is cut to the transition's length with a short fade, so it ends when the effect ends. Choose a slower transition speed to hear more of a long sound; with no transition, the whole sound plays from the cut. Measured within 5 ms in the rendered video, and the live preview plays it the same way. Segments keep lossless audio and the final video's audio is encoded once, so clip audio stays in sync with the picture across every cut.

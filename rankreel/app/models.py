@@ -116,7 +116,6 @@ class Style(BaseModel):
     channel_handle: str = Field(default="@RankCracker", max_length=40)
     channel_verified: bool = True
     channel_avatar: str | None = "rankcracker.jpg"  # file name in assets/brand (or a path)
-    text_shade: bool = True  # single clip: soft dark gradient behind the card + text
 
     @field_validator("rank_color", "rank_active_color", "background")
     @classmethod
@@ -147,7 +146,7 @@ class Style(BaseModel):
 
 class Project(BaseModel):
     # "ranking": the title + rank list over several clips.
-    # "single": one clip with a post-style text (a fact, a caption) under the channel card.
+    # "single": one clip on a plain background with your text above it (and the channel card).
     format: Literal["ranking", "single"] = "ranking"
     title: list[TitleToken] = Field(default_factory=list)
     caption: str = Field(default="", max_length=600)  # single format; {#hex:words} colors words

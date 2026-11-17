@@ -56,6 +56,7 @@ class SegmentSpec:
     tx_out: bool = False  # "fade" only: dip to black at the end of this segment
     sfx_pieces: list[SfxPiece] = field(default_factory=list)
     crop: tuple[int, int, int, int] | None = None  # (w, h, x, y) of the source kept
+    box: tuple[int, int, int, int] | None = None  # single clip: (x, y, w, h) of the video on the background
 
     @property
     def duration(self) -> float:
@@ -144,6 +145,10 @@ def effective_fit(style: Style, seg: SegmentSpec) -> str:
 def fit_graph(style: Style, seg: SegmentSpec, src: str, dst: str) -> str:
     """Filtergraph placing the source in the W x H frame according to the fit mode."""
     W, H = style.width, style.height
+    if seg.box:  # single clip: the video at its place in the layout, plain background around it
+        x, y, w, h = seg.box
+        return (f"{src}scale={w}:{h},setsar=1,pad={W}:{H}:{x}:{y}:color={_hex_ff(style.background)},"
+                f"{PIX}{dst}")
     mode = effective_fit(style, seg)
     if mode == "crop":
         return f"{src}scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},{PIX}{dst}"
@@ -267,12 +272,16 @@ def plan_segments(project: Project, cache_dir: Path | None = None) -> list[Segme
         if clip.crop and src_w and src_h:
             crop = clip.crop.rect(src_w, src_h)
             src_w, src_h = crop[0], crop[1]  # fit decisions use what's left after the crop
+        box = None
+        if project.format == "single" and src_w and src_h:
+            from .overlay import single_layout
+            box = single_layout(project, (src_w, src_h)).video
         specs.append(SegmentSpec(
             clip=clip, overlay=ov, start=start, length=end - start,
             hold=style.end_hold_seconds if i == len(order) - 1 else 0.0,
             has_audio=info.has_audio,
             sfx=sfx,
-            src_w=src_w, src_h=src_h, crop=crop,
+            src_w=src_w, src_h=src_h, crop=crop, box=box,
             tx_in=style.transition != "none" and i > 0,
             tx_out=style.transition == "fade" and i < len(order) - 1,
         ))

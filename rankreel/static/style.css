@@ -90,7 +90,7 @@ textarea { width: 100%; resize: vertical; font-family: ui-monospace, monospace; 
 .crop-panel label { display: grid; grid-template-columns: 48px 1fr 36px; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
 .crop-panel input[type=range] { width: 100%; min-width: 0; margin: 0; }
 .crop-panel output { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
-.crop-actions { display: flex; gap: 6px; grid-column: 1 / -1; }
+.crop-actions { display: flex; gap: 6px; grid-column: 1 / -1; align-items: center; flex-wrap: wrap; }
 .crop-toggle.on { border-color: var(--accent); color: var(--accent); }
 .thumb video { width: 120px; aspect-ratio: 9 / 16; object-fit: contain; background: #000; border-radius: 6px; display: block; }
 .trim { flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; }

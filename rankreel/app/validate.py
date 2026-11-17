@@ -61,10 +61,10 @@ def validate_project(project: Project, require_sources: bool = False) -> Validat
         if not project.caption.strip():
             hints.append("Add the text (a fact or caption about the clip).")
         else:
-            from .overlay import post_is_cut
+            from .overlay import single_text_is_cut
 
             try:
-                if post_is_cut(project):
+                if single_text_is_cut(project):
                     warnings.append("The text is too long to fit; the end is cut off. Shorten it.")
             except FileNotFoundError:
                 pass

@@ -6,11 +6,13 @@ import hashlib
 import json
 import math
 import re
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
+from . import emoji
 from .config import OVERLAY_DIR, avatar_path, resolve_path
 from .models import _GROUP_RE, Project, Style, TitleToken
 
@@ -34,14 +36,17 @@ CARD_HANDLE_COLOR = "#D9DEE3"
 VERIFIED_BLUE = "#1D9BF0"
 SS = 4                 # supersampling for smooth circles
 
-# Single-clip post text
-POST_SIZE_MAX = 58
-POST_SIZE_MIN = 34
-POST_MAX_LINES = 8
-POST_PITCH = 1.28
-POST_TOP = 110         # without the card
-POST_BOTTOM = 980      # keep the text in the top half
-POST_CARD_GAP = 44     # card bottom -> text
+# Single clip (reels-style stack on a plain background)
+SINGLE_MARGIN_X = 60
+SINGLE_MARGIN_Y = 150      # keep clear of the top/bottom of the frame
+SINGLE_TEXT_MAX = 58
+SINGLE_TEXT_MIN = 38
+SINGLE_MAX_LINES = 6
+SINGLE_TEXT_MAX_H = 460
+SINGLE_PITCH = 1.3
+SINGLE_GAP_CARD = 48       # card -> text
+SINGLE_GAP_VIDEO = 52      # text -> video
+SINGLE_LIFT = 60           # sit a little above centre
 
 
 # --------------------------------------------------------------------------- fonts
@@ -66,9 +71,30 @@ def font_path(style: Style) -> str:
 
 
 def renderable(text: str, fpath: str) -> str:
-    """Drop characters the font has no glyph for (e.g. emoji)."""
-    cmap = _cmap(fpath)
-    return "".join(ch for ch in text if ch.isspace() or ord(ch) in cmap)
+    """Keep what can be drawn: characters in the font, plus emoji when a color emoji
+    font is available (see app/emoji.py). Anything else is dropped."""
+    return "".join(piece for piece, _ in emoji.runs(text, _cmap(fpath)))
+
+
+def text_length(text: str, font: ImageFont.FreeTypeFont, fpath: str) -> float:
+    """Advance width of text that may contain emoji."""
+    return sum(emoji.emoji_width(piece, font.size) if is_emoji else font.getlength(piece)
+               for piece, is_emoji in emoji.runs(text, _cmap(fpath)))
+
+
+def draw_text(img: Image.Image, x: float, baseline: float, text: str, font: ImageFont.FreeTypeFont,
+              fpath: str, fill: str, stroke_width: int = 0, stroke_fill: str | None = None) -> float:
+    """Draw text (anchor: left, baseline) with color emoji; returns the x after it."""
+    draw = ImageDraw.Draw(img)
+    for piece, is_emoji in emoji.runs(text, _cmap(fpath)):
+        if is_emoji:
+            emoji.paste(img, x, baseline, piece, font.size)
+            x += emoji.emoji_width(piece, font.size)
+        else:
+            draw.text((x, baseline), piece, font=font, fill=fill, anchor="ls",
+                      stroke_width=stroke_width, stroke_fill=stroke_fill)
+            x += font.getlength(piece)
+    return x
 
 
 def _ellipsis(fpath: str) -> str:
@@ -120,7 +146,7 @@ def layout_title(
         space = font.getlength(" ")
         lines, cur, cur_w, fits = [], [], 0.0, True
         for w, color in words:
-            ww = font.getlength(w)
+            ww = text_length(w, font, fpath)
             if ww > max_w:
                 fits = False
                 break
@@ -145,7 +171,7 @@ def title_box(style: Style) -> tuple[float, float]:
     return top, max(120, style.title_area_height - top)
 
 
-def _draw_title(draw: ImageDraw.ImageDraw, project: Project, fpath: str) -> None:
+def _draw_title(img: Image.Image, project: Project, fpath: str) -> None:
     style = project.style
     top, area_h = title_box(style)
     size, lines = layout_title(project.title, style, fpath, area_h)
@@ -158,14 +184,11 @@ def _draw_title(draw: ImageDraw.ImageDraw, project: Project, fpath: str) -> None
     block_h = cap_h + (len(lines) - 1) * pitch
     baseline = top + (area_h - block_h) / 2 + cap_h
     for line in lines:
-        widths = [font.getlength(w) for w, _ in line]
+        widths = [text_length(w, font, fpath) for w, _ in line]
         total = sum(widths) + space * (len(line) - 1)
         x = (style.width - total) / 2
         for (w, color), ww in zip(line, widths):
-            draw.text(
-                (x, baseline), w, font=font, fill=color, anchor="ls",
-                stroke_width=style.title_stroke, stroke_fill=STROKE_FILL,
-            )
+            draw_text(img, x, baseline, w, font, fpath, color, style.title_stroke, STROKE_FILL)
             x += ww + space
         baseline += pitch
 
@@ -235,9 +258,8 @@ def _verified(d: int) -> Image.Image:
     return img.resize((d, d), Image.LANCZOS)
 
 
-def _draw_card(img: Image.Image, style: Style, fpath: str, align: str = "center") -> None:
-    """Avatar + name (+ verified) + @handle at the top of the frame: centred as a group
-    (ranking) or at the left margin like a post (single clip)."""
+def _draw_card(img: Image.Image, style: Style, fpath: str, top: int = CARD_TOP) -> None:
+    """Avatar + name (+ verified) + @handle, centred as a group, its row starting at ``top``."""
     name = renderable(style.channel_name, fpath).strip()
     handle = renderable(style.channel_handle, fpath).strip()
     if handle and not handle.startswith("@"):
@@ -249,13 +271,13 @@ def _draw_card(img: Image.Image, style: Style, fpath: str, align: str = "center"
     max_text = style.width - 2 * TITLE_MARGIN_X - d - CARD_GAP - (badge + 12 if badge else 0)
     name = _ellipsize(name, max_text, name_font, fpath) if name else ""
     handle = _ellipsize(handle, max_text, handle_font, fpath) if handle else ""
-    name_w = name_font.getlength(name) + (12 + badge if badge else 0)
-    text_w = max(name_w, handle_font.getlength(handle)) if (name or handle) else 0
+    name_w = text_length(name, name_font, fpath) + (12 + badge if badge else 0)
+    text_w = max(name_w, text_length(handle, handle_font, fpath)) if (name or handle) else 0
     group_w = d + (CARD_GAP + text_w if text_w else 0)
-    x0 = TITLE_MARGIN_X if align == "left" else round((style.width - group_w) / 2)
+    x0 = round((style.width - group_w) / 2)
     tile = _avatar(style, d, fpath)
     pad = (tile.width - d) // 2
-    img.alpha_composite(tile, (x0 - pad, CARD_TOP - pad))
+    img.alpha_composite(tile, (x0 - pad, top - pad))
     if not text_w:
         return
     draw = ImageDraw.Draw(img)
@@ -264,22 +286,24 @@ def _draw_card(img: Image.Image, style: Style, fpath: str, align: str = "center"
     handle_cap = -handle_font.getbbox("H", anchor="ls")[1]
     line_gap = 16
     block = (name_cap if name else 0) + (handle_cap if handle else 0) + (line_gap if name and handle else 0)
-    y = CARD_TOP + (d - block) / 2
+    y = top + (d - block) / 2
     if name:
         base = y + name_cap
-        draw.text((tx, base), name, font=name_font, fill="#FFFFFF", anchor="ls",
-                  stroke_width=5, stroke_fill=STROKE_FILL)
+        name_end = draw_text(img, tx, base, name, name_font, fpath, "#FFFFFF", 5, STROKE_FILL)
         if badge:
-            bx = round(tx + name_font.getlength(name) + 12)
+            bx = round(name_end + 12)
             by = round(base - name_cap / 2 - badge / 2)
             img.alpha_composite(_verified(badge), (bx, by))
         y = base + line_gap
     if handle:
-        draw.text((tx, y + handle_cap), handle, font=handle_font, fill=CARD_HANDLE_COLOR, anchor="ls",
-                  stroke_width=4, stroke_fill=STROKE_FILL)
+        draw_text(img, tx, y + handle_cap, handle, handle_font, fpath, CARD_HANDLE_COLOR, 4, STROKE_FILL)
 
 
-# --------------------------------------------------------------------------- single-clip post text
+# --------------------------------------------------------------------------- single clip
+# Reels-style frame on a plain background, stacked and centred:
+#     [channel card]   (optional)
+#     your text        (centred, colorable words)
+#     [ the video ]    (full width, or as large as fits for tall clips)
 def text_font_path(style: Style) -> str:
     p = resolve_path(style.text_font_path)
     return str(p) if p.exists() else font_path(style)
@@ -289,7 +313,7 @@ Word = list[tuple[str, str]]  # a word as colored pieces: "years" + "." can diff
 
 
 def post_paragraphs(caption: str, fpath: str) -> list[list[Word]]:
-    """Post text -> lines (from the user's line breaks) of words. ``{#hex:words}`` colors
+    """Text -> lines (from the user's line breaks) of words. ``{#hex:words}`` colors
     words; punctuation right after a group stays on the same word. Stray braces are
     shown as typed."""
     paras = []
@@ -327,21 +351,20 @@ def _hex6(v: str) -> str:
     return ("#" + "".join(c * 2 for c in v[1:])) if len(v) == 4 else v.upper()
 
 
-def _word_w(font, word: Word) -> float:
-    return sum(font.getlength(t) for t, _ in word)
+def _word_w(font, word: Word, fpath: str) -> float:
+    return sum(text_length(t, font, fpath) for t, _ in word)
 
 
-def layout_post(caption: str, style: Style, fpath: str, top: float):
-    """Largest size (POST_SIZE_MAX..MIN) at which the text fits between ``top`` and
-    POST_BOTTOM in <= POST_MAX_LINES lines. Returns (size, lines); a line is a list of
-    words, [] for a blank line, and whether the text had to be cut (ellipsis)."""
+def layout_text(caption: str, fpath: str, max_w: float, max_h: float):
+    """Largest size (SINGLE_TEXT_MAX..MIN) at which the text fits in max_w x max_h and
+    <= SINGLE_MAX_LINES lines. Returns (size, lines, cut): a line is a list of words
+    ([] for a blank line); ``cut`` is True when even the smallest size didn't fit and
+    the end was replaced by an ellipsis."""
     paras = post_paragraphs(caption, fpath)
     if not paras:
-        return POST_SIZE_MAX, [], False
-    max_w = style.width - 2 * TITLE_MARGIN_X
-    avail = POST_BOTTOM - top
+        return SINGLE_TEXT_MAX, [], False
     lines: list[list[Word]] = []
-    for size in range(POST_SIZE_MAX, POST_SIZE_MIN - 1, -2):
+    for size in range(SINGLE_TEXT_MAX, SINGLE_TEXT_MIN - 1, -2):
         font = _font(fpath, size)
         space = font.getlength(" ")
         lines = []
@@ -351,7 +374,7 @@ def layout_post(caption: str, style: Style, fpath: str, top: float):
                 continue
             cur, cur_w = [], 0.0
             for word in para:
-                ww = min(_word_w(font, word), max_w)
+                ww = min(_word_w(font, word, fpath), max_w)
                 add = ww if not cur else cur_w + space + ww
                 if cur and add > max_w:
                     lines.append(cur)
@@ -360,11 +383,10 @@ def layout_post(caption: str, style: Style, fpath: str, top: float):
                     cur.append(word)
                     cur_w = add
             lines.append(cur)
-        if len(lines) <= POST_MAX_LINES and _post_height(lines, size) <= avail:
+        if len(lines) <= SINGLE_MAX_LINES and text_height(lines, size) <= max_h:
             return size, lines, False
-    # Too long even at the smallest size: keep what fits and end with an ellipsis.
-    size = POST_SIZE_MIN
-    while lines and (len(lines) > POST_MAX_LINES or _post_height(lines, size) > avail):
+    size = SINGLE_TEXT_MIN
+    while lines and (len(lines) > SINGLE_MAX_LINES or text_height(lines, size) > max_h):
         lines.pop()
     while lines and not lines[-1]:
         lines.pop()
@@ -375,63 +397,109 @@ def layout_post(caption: str, style: Style, fpath: str, top: float):
     return size, lines, True
 
 
-def post_top(style: Style) -> float:
-    return card_bottom(style) + POST_CARD_GAP if style.channel_card else POST_TOP
-
-
-def post_is_cut(project: Project) -> bool:
-    """True when the single-clip text is too long and gets cut off."""
-    return layout_post(project.caption, project.style, text_font_path(project.style), post_top(project.style))[2]
-
-
-def _post_height(lines, size: int) -> float:
-    pitch = size * POST_PITCH
-    return sum(pitch * (0.5 if not ln else 1) for ln in lines)
-
-
-def _shade(img: Image.Image, bottom: float, strength: float = 0.55) -> None:
-    """Dark gradient from the top of the frame, fading out at ``bottom``: keeps white text
-    readable on bright footage without a visible box."""
-    h = max(1, int(bottom))
-    col = Image.new("L", (1, h))
-    col.putdata([int(255 * strength * (1 - (y / h)) ** 1.6) for y in range(h)])
-    layer = Image.new("RGBA", (img.width, h), (0, 0, 0, 0))
-    layer.putalpha(col.resize((img.width, h)))
-    img.alpha_composite(layer, (0, 0))
-
-
-def _draw_post(img: Image.Image, project: Project, fpath: str) -> None:
-    style = project.style
-    tpath = text_font_path(style)
-    top = post_top(style)
-    size, lines, _ = layout_post(project.caption, style, tpath, top)
-    text_bottom = top + _post_height(lines, size)
-    if style.text_shade and (lines or style.channel_card):
-        _shade(img, (text_bottom if lines else card_bottom(style)) + 220)
-    if style.channel_card:
-        _draw_card(img, style, fpath, align="left")
+def text_height(lines, size: int) -> float:
+    """Height of the text block: cap height of the first line + one pitch per later line."""
     if not lines:
+        return 0.0
+    pitch = size * SINGLE_PITCH
+    cap = size * 0.72
+    rest = lines[1:]
+    return cap + sum(pitch * (0.5 if not ln else 1) for ln in rest)
+
+
+@lru_cache(maxsize=64)
+def _source_size(path: str, mtime_ns: int) -> tuple[int, int] | None:
+    from .probe import probe
+
+    try:
+        info = probe(path)
+    except RuntimeError:
+        return None
+    return (info.width, info.height) if info.width and info.height else None
+
+
+def clip_shape(project: Project) -> tuple[int, int] | None:
+    """(w, h) of the single clip after its crop, or None if it isn't downloaded."""
+    if not project.clips:
+        return None
+    clip = project.clips[0]
+    if not clip.local_path or not Path(clip.local_path).is_file():
+        return None
+    p = Path(clip.local_path)
+    size = _source_size(str(p), p.stat().st_mtime_ns)
+    if not size:
+        return None
+    w, h = size
+    if clip.crop:
+        w, h = clip.crop.rect(w, h)[:2]
+    return w, h
+
+
+def _even(v: float) -> int:
+    return max(2, int(round(v / 2)) * 2)
+
+
+@dataclass
+class SingleLayout:
+    card_top: int | None      # top of the channel card row (None: no card)
+    text_top: int             # top of the text block (cap line of the first line)
+    size: int                 # text font size
+    lines: list
+    cut: bool                 # text too long: the end is cut off
+    video: tuple[int, int, int, int]  # (x, y, w, h) of the video in the frame
+
+
+def single_layout(project: Project, shape: tuple[int, int] | None = None) -> SingleLayout:
+    style = project.style
+    W, H = style.width, style.height
+    shape = shape or clip_shape(project) or (16, 9)  # not downloaded yet: assume landscape
+    aspect = shape[0] / shape[1]
+    size, lines, cut = layout_text(project.caption, text_font_path(style),
+                                   W - 2 * SINGLE_MARGIN_X, SINGLE_TEXT_MAX_H)
+    th = text_height(lines, size)
+    card_h = CARD_AVATAR if style.channel_card else 0
+    above = card_h + (SINGLE_GAP_CARD if card_h and lines else 0) + th
+    above += SINGLE_GAP_VIDEO if (card_h or lines) else 0
+    vw, vh = W, W / aspect
+    max_vh = H - 2 * SINGLE_MARGIN_Y - above
+    if vh > max_vh:  # tall clip: as large as fits, centred with plain sides
+        vh, vw = max_vh, max_vh * aspect
+    vw, vh = min(_even(vw), W), _even(vh)
+    top = max(SINGLE_MARGIN_Y, (H - (above + vh)) / 2 - SINGLE_LIFT)
+    card_top = round(top) if card_h else None
+    text_top = round(top + card_h + (SINGLE_GAP_CARD if card_h else 0))
+    vy = _even(top + above)
+    return SingleLayout(card_top, text_top, size, lines, cut, ((W - vw) // 2 // 2 * 2, vy, vw, vh))
+
+
+def single_text_is_cut(project: Project) -> bool:
+    return single_layout(project).cut
+
+
+def _draw_single(img: Image.Image, project: Project, fpath: str) -> None:
+    style = project.style
+    lay = single_layout(project)
+    if lay.card_top is not None:
+        _draw_card(img, style, fpath, top=lay.card_top)
+    if not lay.lines:
         return
+    tpath = text_font_path(style)
     draw = ImageDraw.Draw(img)
-    font = _font(tpath, size)
+    font = _font(tpath, lay.size)
     space = font.getlength(" ")
-    cap_h = -font.getbbox("H", anchor="ls")[1]
-    pitch = size * POST_PITCH
-    stroke = max(3, round(size / 13))
-    y = top
-    for line in lines:
+    pitch = lay.size * SINGLE_PITCH
+    base = lay.text_top + lay.size * 0.72
+    for line in lay.lines:
         if not line:
-            y += pitch * 0.5
+            base += pitch * 0.5
             continue
-        x = TITLE_MARGIN_X
-        base = y + cap_h
+        total = sum(_word_w(font, w, tpath) for w in line) + space * (len(line) - 1)
+        x = (style.width - total) / 2
         for word in line:
             for text, color in word:
-                draw.text((x, base), text, font=font, fill=color, anchor="ls",
-                          stroke_width=stroke, stroke_fill=STROKE_FILL)
-                x += font.getlength(text)
+                x = draw_text(img, x, base, text, font, tpath, color)
             x += space
-        y += pitch
+        base += pitch
 
 
 # --------------------------------------------------------------------------- ranks
@@ -443,23 +511,24 @@ def _name_font_size(names: list[str], max_w: float, style: Style, fpath: str) ->
     min_size = max(12, int(style.rank_font_size * RANK_NAME_MIN_RATIO))
     for size in range(style.rank_font_size, min_size - 1, -2):
         font = _font(fpath, size)
-        if all(font.getlength(n) <= max_w for n in names):
+        if all(text_length(n, font, fpath) <= max_w for n in names):
             return size
     return min_size
 
 
 def _ellipsize(name: str, max_w: float, font: ImageFont.FreeTypeFont, fpath: str) -> str:
-    if font.getlength(name) <= max_w:
+    if text_length(name, font, fpath) <= max_w:
         return name
     ell = _ellipsis(fpath)
     text = name
-    while text and font.getlength(text.rstrip() + ell) > max_w:
+    while text and text_length(text.rstrip() + ell, font, fpath) > max_w:
         text = text[:-1]
     return (text.rstrip() + ell) if text else ell
 
 
-def _draw_ranks(draw: ImageDraw.ImageDraw, project: Project, step: int, fpath: str) -> None:
+def _draw_ranks(img: Image.Image, project: Project, step: int, fpath: str) -> None:
     style = project.style
+    draw = ImageDraw.Draw(img)
     revealed, active = overlay_state(project, step)
     n = len(project.clips)
     if n == 0:
@@ -481,7 +550,7 @@ def _draw_ranks(draw: ImageDraw.ImageDraw, project: Project, step: int, fpath: s
             name = all_names[rank - 1]
             if name:
                 text = _ellipsize(name, max_name_w, name_font, fpath)
-                draw.text((name_x, baseline), text, font=name_font, fill=color, **kw)
+                draw_text(img, name_x, baseline, text, name_font, fpath, color, style.rank_stroke, STROKE_FILL)
 
 
 # --------------------------------------------------------------------------- public
@@ -490,13 +559,12 @@ def render_overlay(project: Project, step: int) -> Image.Image:
     fpath = font_path(style)
     img = Image.new("RGBA", (style.width, style.height), (0, 0, 0, 0))
     if project.format == "single":
-        _draw_post(img, project, fpath)
+        _draw_single(img, project, fpath)
         return img
     if style.channel_card:
         _draw_card(img, style, fpath)
-    draw = ImageDraw.Draw(img)
-    _draw_title(draw, project, fpath)
-    _draw_ranks(draw, project, step, fpath)
+    _draw_title(img, project, fpath)
+    _draw_ranks(img, project, step, fpath)
     return img
 
 
@@ -508,6 +576,7 @@ def overlay_key(project: Project, step: int) -> str:
         "v": OVERLAY_VERSION,
         "format": project.format,
         "caption": project.caption if project.format == "single" else None,
+        "video_box": single_layout(project).video if project.format == "single" else None,
         "title": [t.model_dump() for t in project.title],
         "rows": [
             [c.rank, c.name if c.rank in revealed else None]
@@ -518,6 +587,7 @@ def overlay_key(project: Project, step: int) -> str:
         "font": [str(fp), st.st_size, st.st_mtime_ns],
         "text_font": _file_stamp(resolve_path(project.style.text_font_path)),
         "avatar": _avatar_stamp(project.style),
+        "emoji": emoji.font_stamp(),
     }
     return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 

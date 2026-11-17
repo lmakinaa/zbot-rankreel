@@ -349,3 +349,25 @@ def test_crop_rect_is_even_and_inside():
     assert Clip(url="https://www.tiktok.com/@a/video/1", rank=1, crop={"top": 0}).crop is None
     with pytest.raises(Exception):
         Crop(top=0.6)
+
+
+def test_single_clip_renders_video_in_its_box(tmp_path):
+    """Reels-style single clip: black above/below, the (cropped) video in the layout's box."""
+    from app.overlay import single_layout
+
+    src = _edge_striped_square(tmp_path / "sq.mp4")
+    p = Project.model_validate({
+        "format": "single", "caption": "A {#FFD400:fact} about it",
+        "clips": [{"url": "https://www.instagram.com/reel/abc/", "rank": 1, "start": 0, "end": 2,
+                   "local_path": str(src), "crop": {"top": 0.21875, "bottom": 0.21875}}],  # -> 16:9
+        "style": {"channel_card": False},
+    })
+    x, y, w, h = single_layout(p).video
+    assert (x, w) == (0, 1080) and abs(h - 608) <= 4
+    out = compose(p, tmp_path / "o.mp4", tmp_path / "w")
+    assert sum(_pixel(out, 540, max(0, y - 30))) < 40          # black just above the video
+    assert sum(_pixel(out, 540, min(1915, y + h + 30))) < 40   # and below it
+    r, g, b = _pixel(out, 540, y + h // 2)
+    assert r > 150 and g < 90                                  # the red footage
+    r, g, b = _pixel(out, 2, y + h // 2)
+    assert g > 150 and r < 120                                 # whole width kept: edge stripe visible

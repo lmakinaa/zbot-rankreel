@@ -1,5 +1,7 @@
 import hashlib
 
+import pytest
+
 from PIL import Image
 
 from app.overlay import layout_title, overlay_png, overlay_state, render_overlay, font_path
@@ -72,12 +74,45 @@ def test_title_shrinks_to_two_lines(project_factory):
     assert size < p.style.title_font_size_max and len(lines) <= 2
 
 
-def test_emoji_dropped_from_overlay(project_factory):
+def _no_emoji_font(monkeypatch):
+    from app import emoji
+
+    for f in (emoji.emoji_font, emoji._emoji_cmap, emoji.emoji_image):
+        f.cache_clear()
+    monkeypatch.setattr(emoji, "_paths", lambda: [])
+    return emoji
+
+
+def test_emoji_drawn_in_color(project_factory):
+    from app import emoji
+    from app.models import parse_title_markup
+
+    if not emoji.emoji_font():
+        pytest.skip("no color emoji font on this machine")
     p = project_factory()
     fp = font_path(p.style)
-    from app.models import parse_title_markup
     _, lines = layout_title(parse_title_markup("FUNNY 😭 CATS"), p.style, fp)
-    assert [w for line in lines for w, _ in line] == ["FUNNY", "CATS"]
+    assert [w for line in lines for w, _ in line] == ["FUNNY", "😭", "CATS"]
+    p.title = parse_title_markup("😭")
+    img = render_overlay(p, -1)
+    region = img.crop((0, 0, 1080, 400))
+    px = region.get_flattened_data() if hasattr(region, "get_flattened_data") else region.getdata()
+    colors = {c[:3] for c in px if c[3] > 200}
+    assert any(r > 200 and 120 < g < 230 and b < 90 for r, g, b in colors)  # the face's yellow
+
+
+def test_emoji_dropped_without_emoji_font(project_factory, monkeypatch):
+    from app.models import parse_title_markup
+
+    emoji = _no_emoji_font(monkeypatch)
+    try:
+        p = project_factory()
+        _, lines = layout_title(parse_title_markup("FUNNY 😭 CATS"), p.style, font_path(p.style))
+        assert [w for line in lines for w, _ in line] == ["FUNNY", "CATS"]
+    finally:
+        monkeypatch.undo()
+        for f in (emoji.emoji_font, emoji._emoji_cmap, emoji.emoji_image):
+            f.cache_clear()
 
 
 def test_long_name_stays_inside_frame(project_factory):
@@ -206,17 +241,34 @@ def _single(caption="Cats can remember a puzzle for {#FFD400:10 years}.", **styl
                    style={"channel_card": True, **style})
 
 
-def test_single_has_card_and_text_but_no_title_or_ranks():
-    img = render_overlay(_single(), 0)
-    # Nothing below the text area: no rank list.
-    assert img.crop((0, 1000, 1080, 1920)).getbbox() is None
-    # Yellow words are drawn; the ranking title colours aren't.
-    cols = _colors(img, (0, 0, 1080, 1000))
+def test_single_stacks_card_text_then_video():
+    from app.overlay import CARD_AVATAR, single_layout
+
+    p = _single()
+    lay = single_layout(p)
+    x, y, w, h = lay.video
+    # Not downloaded yet: assumes 16:9, full width, centred-ish, everything in order top to bottom.
+    assert (x, w) == (0, 1080) and abs(h - 608) <= 2
+    assert lay.card_top < lay.text_top < y and y + h <= 1920 - 150
+    img = render_overlay(p, 0)
+    # The overlay leaves the video area clear and draws nothing below it: no rank list.
+    assert img.crop((0, y + 4, 1080, 1920)).getbbox() is None
+    cols = _colors(img, (0, 0, 1080, y))
     assert YELLOW in cols and (0xFF, 0x3B, 0x30) not in cols
-    # Card is left-aligned like a post: ink starts at the left margin.
-    from app.overlay import CARD_AVATAR, CARD_TOP
-    band = img.getchannel("A").crop((0, CARD_TOP, 1080, CARD_TOP + CARD_AVATAR))
-    assert band.point(lambda a: 255 if a == 255 else 0).getbbox()[0] < 70
+    # Card and text are centred.
+    bbox = img.getchannel("A").crop((0, lay.card_top, 1080, lay.card_top + CARD_AVATAR)).getbbox()
+    assert abs((bbox[0] + bbox[2]) / 2 - 540) < 40
+    tb = img.getchannel("A").crop((0, lay.text_top - 10, 1080, y)).getbbox()
+    assert abs((tb[0] + tb[2]) / 2 - 540) < 20
+
+
+def test_single_tall_clip_shrinks_to_fit_and_card_is_optional():
+    from app.overlay import single_layout
+
+    tall = single_layout(_single(), (720, 1280)).video
+    assert tall[3] <= 1920 - 2 * 150 and tall[2] < 1080 and tall[0] == (1080 - tall[2]) // 2 // 2 * 2
+    without = single_layout(_single(channel_card=False), (16, 9))
+    assert without.card_top is None and without.text_top < single_layout(_single(), (16, 9)).text_top
 
 
 def test_post_punctuation_sticks_to_colored_word():
@@ -224,25 +276,21 @@ def test_post_punctuation_sticks_to_colored_word():
 
     fp = text_font_path(_single().style)
     (line,) = post_paragraphs("up to {#FFD400:10 years}. Wow", fp)
-    assert [ "".join(t for t, _ in w) for w in line] == ["up", "to", "10", "years.", "Wow"]
+    assert ["".join(t for t, _ in w) for w in line] == ["up", "to", "10", "years.", "Wow"]
     assert line[3] == [("years", "#FFD400"), (".", "#FFFFFF")]
     # Line breaks are kept; stray braces don't crash.
     paras = post_paragraphs("one\n\ntwo {oops", fp)
     assert len(paras) == 3 and paras[1] == [] and "".join(t for t, _ in paras[2][1]) == "{oops"
 
 
-def test_post_text_shrinks_then_cuts():
-    from app.overlay import POST_SIZE_MAX, POST_SIZE_MIN, layout_post, post_is_cut, post_top, text_font_path
+def test_single_text_shrinks_then_cuts():
+    from app.overlay import SINGLE_TEXT_MAX, SINGLE_TEXT_MIN, single_layout, single_text_is_cut
 
-    p = _single("short")
-    fp = text_font_path(p.style)
-    size, lines, cut = layout_post("short", p.style, fp, post_top(p.style))
-    assert size == POST_SIZE_MAX and not cut
-    medium = " ".join(["word"] * 60)
-    size, _, cut = layout_post(medium, p.style, fp, post_top(p.style))
-    assert POST_SIZE_MIN <= size < POST_SIZE_MAX and not cut
-    long = " ".join(["longword"] * 66)
-    assert post_is_cut(_single(long)) and not post_is_cut(_single(medium))
+    assert single_layout(_single("short")).size == SINGLE_TEXT_MAX
+    medium = " ".join(["word"] * 45)
+    lay = single_layout(_single(medium))
+    assert SINGLE_TEXT_MIN <= lay.size < SINGLE_TEXT_MAX and not lay.cut
+    assert single_text_is_cut(_single(" ".join(["longword"] * 66)))
 
 
 def test_single_overlay_key_tracks_caption():

@@ -20,7 +20,7 @@ from .config import (BRAND_DIR, DOWNLOAD_DIR, OUTPUT_DIR, PROJECTS_DIR, SFX_DIR,
                      WORK_DIR, ensure_dirs)
 from .downloader import FetchError, fetch, fill_from_cache
 from .models import Project, parse_title_markup
-from .overlay import render_overlay
+from .overlay import render_overlay, single_layout
 from .render_job import JobManager, slugify
 from .probe import probe
 from .sfx_gen import DEFAULT_SFX, SOUNDS, ensure_default_sfx, prepare_sound
@@ -67,7 +67,13 @@ def _check_avatar(project: Project) -> None:
 # --------------------------------------------------------------------------- UI + files
 @app.get("/", include_in_schema=False)
 def index():
-    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+    # Stamp the script/stylesheet links with their file times so a browser never keeps
+    # running an old app.js against a new page after an update.
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    for name in ("app.js", "style.css"):
+        v = (STATIC_DIR / name).stat().st_mtime_ns
+        html = html.replace(f'"/static/{name}"', f'"/static/{name}?v={v}"')
+    return Response(html, media_type="text/html", headers={"Cache-Control": "no-cache"})
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -122,6 +128,7 @@ class PreviewIn(BaseModel):
 def preview_overlay(body: PreviewIn):
     p = body.project
     _check_avatar(p)
+    fill_from_cache(p, trust_local=False)  # the single-clip layout depends on the clip's shape
     step = max(-1, min(body.step, len(p.play_order) - 1))
     if sorted(p.play_order) != sorted(c.rank for c in p.clips):
         step = -1  # order invalid: show numbers only rather than failing
@@ -131,7 +138,10 @@ def preview_overlay(body: PreviewIn):
         raise HTTPException(422, str(e))
     buf = io.BytesIO()
     img.save(buf, format="PNG", compress_level=1)
-    return Response(buf.getvalue(), media_type="image/png")
+    headers = {}
+    if p.format == "single":  # where the editor should place the video under this overlay
+        headers["X-Video-Box"] = ",".join(map(str, single_layout(p).video))
+    return Response(buf.getvalue(), media_type="image/png", headers=headers)
 
 
 class MarkupIn(BaseModel):
