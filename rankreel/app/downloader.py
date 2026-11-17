@@ -108,11 +108,24 @@ def cached_meta(url: str, base: Path = DOWNLOAD_DIR) -> ClipMeta | None:
     return None
 
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_RESTRICTED = ("isn't available to everyone", "isn\u2019t available to everyone", "certain audiences",
+               "age-restricted", "age restricted", "inappropriate for some users", "sensitive content")
+
+
 def _friendly(msg: str, url: str = "") -> str:
+    msg = _ANSI.sub("", msg)
     m = msg.lower()
     site = site_name(url) if url else "The site"
     if "private" in m:
         return "This video is private."
+    if any(k in m for k in _RESTRICTED):
+        if cookies_from_browser() or cookies_file():
+            return (f"{site} restricts this video (age or audience), and your login didn't get past it. "
+                    f"Make sure you're logged in to {site} in that browser, then try again.")
+        return (f"{site} only shows this video to logged-in accounts (age or audience restriction). "
+                f"Log in to {site} in your browser, then set cookies_from_browser in config.json "
+                "(e.g. \"firefox\" or \"brave\") and restart. See the README.")
     if "log in" in m or "login" in m or "cookies" in m or "empty media response" in m:
         how = ("then set cookies_from_browser in config.json (e.g. \"firefox\" or \"chrome\"), "
                "or export cookies.txt and set cookies_file. See the README.")
@@ -158,6 +171,7 @@ def _download(url: str, key: str, base: Path) -> ClipMeta:
         "no_warnings": True,
         "noprogress": True,
         "noplaylist": True,
+        "no_color": True,
         "ffmpeg_location": str(Path(ffmpeg_bin()).parent),
     }
     cookies = cookies_file()

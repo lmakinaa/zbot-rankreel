@@ -109,3 +109,16 @@ def test_real_instagram_reel_download(tmp_path):
     meta = dl.fetch("https://www.instagram.com/reel/CDUMkliABpa/?igsh=test", tmp_path)
     assert meta.duration > 0 and meta.handle == "@clippedinandfree"
     assert meta.webpage_url == "https://www.instagram.com/reel/CDUMkliABpa/"
+
+
+def test_restricted_reel_explains_login_and_strips_colors(monkeypatch):
+    monkeypatch.setattr(dl, "cookies_from_browser", lambda: None)
+    monkeypatch.setattr(dl, "cookies_file", lambda: None)
+    raw = ("\x1b[0;31mERROR:\x1b[0m [Instagram] Dc0x5cwSDSf: This content isn't available to everyone: "
+           "It can't be seen by certain audiences.")
+    msg = dl._friendly(raw, "https://www.instagram.com/reel/Dc0x5cwSDSf/")
+    assert "\x1b" not in msg and "[0;31m" not in msg
+    assert "logged-in" in msg and "cookies_from_browser" in msg
+    monkeypatch.setattr(dl, "cookies_from_browser", lambda: "firefox")
+    assert "your login didn't get past it" in dl._friendly(raw, "https://www.instagram.com/reel/x/")
+    assert "\x1b" not in dl._friendly("\x1b[0;31mERROR:\x1b[0m something odd")
