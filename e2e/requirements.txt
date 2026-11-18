@@ -1,0 +1,2 @@
+anthropic[mcp]>=2.10,<3
+mcp>=2.3,<3

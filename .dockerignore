@@ -1,0 +1,26 @@
+# Read by both Docker and Podman (Podman uses .dockerignore when there is no .containerignore).
+.git
+.claude
+**/.DS_Store
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.venv
+**/venv
+**/config.json
+**/cookies*.txt
+rankreel/cache
+rankreel/output
+rankreel/projects
+rankreel_backup
+rankreel-clip-picker
+*.skill
+*.zip
+
+# Include the shipped sounds, keeping other local uploads out of the image.
+rankreel/assets/sfx/*
+!rankreel/assets/sfx/README.txt
+!rankreel/assets/sfx/core_sound_effect.mp3
+!rankreel/assets/sfx/vibrate.wav
+!rankreel/assets/sfx/vibrate_double.wav
+!rankreel/assets/sfx/vibrate_heavy.wav

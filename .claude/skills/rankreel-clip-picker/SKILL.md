@@ -25,6 +25,7 @@ The scripts are in this skill's `scripts/` folder; `<skill>` below means this sk
 - **Anywhere else** (e.g. Claude.ai): first `pip install yt-dlp pillow imageio-ffmpeg` (skip what's already installed; ffmpeg from the system works too) and run the scripts with `python`. Use a work folder like `./picks/`. The scripts detect that RankReel is missing and switch to standalone mode on their own.
   - If downloading a link fails because the environment can't reach TikTok/Instagram (or Instagram asks for a login), ask the user to **upload the video files** and give you the matching links. Pass each as `path/to/file.mp4::https://www.tiktok.com/@user/video/123`. The link is still needed: RankReel uses it to credit the creator and download the clip when rendering.
   - At the end, the project file is the deliverable: save or copy it to the place this environment uses for files the user can download (e.g. `/mnt/user-data/outputs/`).
+- **RankReel connector available** (you have RankReel's `save_project` tool, e.g. Claude Desktop with the RankReel MCP server): analyze and build exactly as in the standalone case. Then, instead of handing over a file, call `save_project` with the contents of the built project `.json` (pass the object; JSON text also works). It saves the draft straight into the user's RankReel and returns an `editor_url`. If it refuses with errors, fix the picks, rebuild and save again. A taken name never gets overwritten (it saves as `_2`), so don't retry with the same picks once it has succeeded. `check_project` runs the same checks without saving, `list_sounds` gives valid `style.transition_sfx` names, and `list_projects` / `get_project` read existing drafts (e.g. "tweak yesterday's reel": get it, change it, save it as a new draft). The connector can't render: the user reviews and renders in the editor.
 
 ## Workflow
 
@@ -84,6 +85,7 @@ It assigns ranks and the play order with the rules above, checks the clips (Rank
 3. Two or three alternative titles.
 4. How to use it:
    - Next to RankReel: open RankReel (reload the page so the list refreshes) → **Load project…** → the project name. Or render directly: `cd rankreel && .venv/bin/python cli.py render projects/<name>.json`.
+   - Saved through the RankReel connector: give them the `editor_url` link (it opens the draft in the editor) and the saved name (it's also under **Load project…**). No file or Import step needed.
    - Standalone: give them the project `.json` file to download, and show its contents in a ```json code block too. In RankReel they click **Import** (top bar), paste it or choose the file, and click Import; the clips download automatically. (Putting the file in `rankreel/projects/` and using **Load project…** also works.)
 5. Anything you dropped or doubted (a failed link, a weak video, a clip that only works with sound).
 

@@ -1,0 +1,40 @@
+# RankReel with Docker Compose:   docker compose up -d --build
+# Then open http://127.0.0.1:8766
+#
+# The image is built from the same Containerfile Podman uses.
+# Fixed container and volume names keep the Claude Desktop config
+# (`docker exec -i rankreel python -m app.mcp_server`) and the data volumes predictable.
+
+services:
+  rankreel:
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: runtime
+      args:
+        BASE_IMAGE: ${RANKREEL_BASE_IMAGE:-registry.fedoraproject.org/fedora:44}
+    image: rankreel:latest
+    container_name: rankreel
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8766:8765"   # only reachable from this computer
+    volumes:
+      - rankreel-cache:/app/cache
+      - rankreel-projects:/app/projects
+      - rankreel-output:/app/output
+      - rankreel-sfx:/app/assets/sfx
+      # Links that need login: uncomment both lines below and put cookies.txt next to this file.
+      # - ./cookies.txt:/run/cookies.txt:ro
+    # environment:
+    #   RANKREEL_COOKIES: /run/cookies.txt
+
+volumes:
+  rankreel-cache:
+    name: rankreel-cache
+  rankreel-projects:
+    name: rankreel-projects
+  rankreel-output:
+    name: rankreel-output
+  rankreel-sfx:
+    name: rankreel-sfx

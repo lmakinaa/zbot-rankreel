@@ -4,6 +4,98 @@ Turn TikTok and Instagram Reel links into a vertical ranked-clip Short: a big ti
 
 Output: a 1080×1920 / 30 fps MP4 plus a `credits.txt` with each creator's handle and link for the description.
 
+## Run with Podman
+
+Run these commands from the repository root (the directory containing `Containerfile`). The base image comes directly from Fedora's registry (`registry.fedoraproject.org/fedora:44`). The image includes Python, FFmpeg/FFprobe (downloaded at build time by `static-ffmpeg`), the font, and the Core sound effect.
+
+On macOS or Windows, initialize Podman's VM once if needed, then start it:
+
+```bash
+podman machine init          # first time only
+podman machine start        # if it is not already running
+```
+
+Build and start the app:
+
+```bash
+podman build --format docker -t localhost/rankreel:latest .
+podman run -d --name rankreel --init --restart unless-stopped \
+  -p 127.0.0.1:8766:8765 \
+  -v rankreel-cache:/app/cache \
+  -v rankreel-projects:/app/projects \
+  -v rankreel-output:/app/output \
+  -v rankreel-sfx:/app/assets/sfx \
+  localhost/rankreel:latest
+```
+
+Open [RankReel](http://127.0.0.1:8766). It runs as a non-root user inside the container and the published port listens only on this computer. The image format keeps the built-in health check available to Podman. The host uses port 8766 so it can coexist with services already using 8765; the app still uses 8765 inside the container.
+
+The four named volumes preserve downloaded clips, projects, finished videos, and uploaded sounds when the container is recreated. The sounds volume starts with the bundled sounds, including Core sound effect. These volumes are separate from any files made by a host Python install. Download videos through the app, or copy files out with `podman cp rankreel:/app/output/. ./exports`.
+
+```bash
+podman stop rankreel         # stop
+podman start rankreel        # start the existing container again
+podman logs -f rankreel      # view logs
+podman healthcheck run rankreel
+```
+
+To update, rebuild the image, stop and remove just the container with `podman stop rankreel` and `podman rm rankreel`, then repeat `podman run` above with the same volume names. Saved data stays in those volumes.
+
+Run the full test suite, including the editor tests, in a disposable test container:
+
+```bash
+podman build --format docker --target test -t localhost/rankreel-test .
+podman run --rm localhost/rankreel-test
+```
+
+Local `config.json`, cookies, caches, projects, renders, and other uploaded sounds are excluded from the build context. If a link needs login, mount your cookies file read-only at `/run/cookies.txt` and add `-e RANKREEL_COOKIES=/run/cookies.txt` to `podman run`.
+
+If image downloads report an unknown certificate authority on a managed Mac, import the Mac's trusted certificates into the VM, then retry:
+
+```bash
+podman machine stop
+podman machine set --import-native-ca
+podman machine start
+```
+
+See the [Podman build](https://docs.podman.io/en/stable/markdown/podman-build.1.html) and [run](https://docs.podman.io/en/stable/markdown/podman-run.1.html) references for more options.
+
+## Run with Docker
+
+Docker builds the same `Containerfile`. From the repository root, with Docker Compose:
+
+```bash
+docker compose up -d --build     # build and start
+docker compose logs -f           # view logs
+docker compose down              # stop and remove the container (volumes and data stay)
+```
+
+Open [RankReel](http://127.0.0.1:8766). [`compose.yaml`](../compose.yaml) uses the same port, container name (`rankreel`) and volume names as the Podman setup above. To update, run `docker compose up -d --build` again. For links that need login, uncomment the cookies lines in `compose.yaml`.
+
+If the build hangs at `FROM registry.fedoraproject.org/fedora:44` (Fedora's registry can be very slow on some networks), pull the same official image from Docker Hub instead: `RANKREEL_BASE_IMAGE=docker.io/library/fedora:44 docker compose up -d --build`, or add `--build-arg BASE_IMAGE=docker.io/library/fedora:44` to `docker build`.
+
+Without Compose:
+
+```bash
+docker build -f Containerfile --target runtime -t rankreel:latest .
+docker run -d --name rankreel --init --restart unless-stopped \
+  -p 127.0.0.1:8766:8765 \
+  -v rankreel-cache:/app/cache \
+  -v rankreel-projects:/app/projects \
+  -v rankreel-output:/app/output \
+  -v rankreel-sfx:/app/assets/sfx \
+  rankreel:latest
+```
+
+Run the tests in a disposable container:
+
+```bash
+docker build -f Containerfile --target test -t rankreel-test .
+docker run --rm rankreel-test
+```
+
+Docker and Podman share `.dockerignore` (Podman reads it when there's no `.containerignore`), so local `config.json`, cookies, caches, projects and renders stay out of the image with either tool.
+
 ## Install
 
 You need **Python 3.11+** and **ffmpeg** (with ffprobe):
@@ -65,6 +157,36 @@ The total duration updates live. It turns red with "Over 40s — trim clips" abo
 
 Your work is kept in the browser's localStorage. **Save** writes it to `projects/`, and **Load project…** reopens it. Every render also saves its project JSON next to the output name.
 
+## Use with Claude Desktop
+
+RankReel includes a small MCP server so Claude can save draft reels straight into the app. You then open the draft, check the trims and render it yourself. Claude can list, read, check and save projects, but it can't delete or render.
+
+The server runs inside the running container, so drafts land in the same `rankreel-projects` volume the app reads, and there's no extra port or anything to install on your computer. Add this to Claude Desktop's config (**Settings → Developer → Edit Config**, which opens `claude_desktop_config.json`), then restart Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "rankreel": {
+      "command": "podman",
+      "args": ["exec", "-i", "rankreel", "python", "-m", "app.mcp_server"]
+    }
+  }
+}
+```
+
+With Docker, use `"command": "docker"` and the same `args`. The `rankreel` container has to be running (`podman start rankreel` or `docker compose up -d`). If Claude Desktop can't find `podman` or `docker`, use the full path (`which podman` / `which docker`). Without a container, point `command` at your venv's Python (`/path/to/rankreel/.venv/bin/python`), use `"args": ["-m", "app.mcp_server"]`, and add `"env": {"PYTHONPATH": "/path/to/rankreel"}`.
+
+Tools:
+
+- `save_project`: checks the project and saves it as a new draft (it never overwrites; a taken name gets `_2`). It returns an `editor_url` like `http://127.0.0.1:8766/?project=<name>` that opens the draft in the editor. Set `RANKREEL_PUBLIC_URL` if the app is on a different address.
+- `check_project`: the same checks without saving.
+- `list_projects`, `get_project`: read saved drafts.
+- `list_sounds`: names usable as `style.transition_sfx`.
+
+Drafts also appear under **Load project…**. The clip-picker skill uses `save_project` automatically when the tool is connected. claude.ai on the web can't reach your computer, so there you keep using **Import**.
+
+To try the server without Claude: `npx @modelcontextprotocol/inspector podman exec -i rankreel python -m app.mcp_server` (or `docker exec …`).
+
 ## CLI
 
 ```bash
@@ -118,4 +240,4 @@ RANKREEL_NETWORK_TESTS=1 pytest -k real_tiktok   # one real download
 
 Editor regression tests also run through pytest when Node.js is installed; no npm packages are needed.
 
-Layout: `app/models.py` (data model and title markup), `timeparse.py`, `validate.py`, `overlay.py` (Pillow), `compose.py` (ffmpeg), `downloader.py` (yt-dlp and cache), `render_job.py` (pipeline and background jobs), `main.py` (FastAPI), `static/` (UI), `cli.py`.
+Layout: `app/models.py` (data model and title markup), `timeparse.py`, `validate.py`, `overlay.py` (Pillow), `compose.py` (ffmpeg), `downloader.py` (yt-dlp and cache), `render_job.py` (pipeline and background jobs), `projects.py` (saved projects), `main.py` (FastAPI), `mcp_server.py` (MCP tools for Claude), `static/` (UI), `cli.py`.

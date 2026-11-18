@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import io
-import json
-import re
-from datetime import datetime
 from pathlib import Path
 
 import uuid
@@ -14,10 +11,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
-from .config import (BRAND_DIR, DOWNLOAD_DIR, OUTPUT_DIR, PROJECTS_DIR, SFX_DIR, SFX_EXTENSIONS, STATIC_DIR,
-                     WORK_DIR, ensure_dirs)
+from . import projects
+from .config import BRAND_DIR, DOWNLOAD_DIR, OUTPUT_DIR, SFX_DIR, SFX_EXTENSIONS, STATIC_DIR, WORK_DIR, ensure_dirs
 from .downloader import FetchError, fetch, fill_from_cache
 from .models import Project, parse_title_markup
 from .overlay import render_overlay, single_layout
@@ -33,19 +30,16 @@ ensure_default_sfx()
 app = FastAPI(title="RankReel", docs_url="/api/docs", redoc_url=None)
 jobs = JobManager()
 
-_SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 _SFX_EXT = SFX_EXTENSIONS
 MAX_SFX_BYTES = 10 * 1024 * 1024
 MAX_SFX_SECONDS = 10.0
 
 
 def _safe_file(base: Path, name: str) -> Path:
-    if not _SAFE_NAME.match(name) or name.startswith("."):
-        raise HTTPException(404)
-    p = (base / name).resolve()
-    if p.parent != base.resolve() or not p.is_file():
-        raise HTTPException(404)
-    return p
+    try:
+        return projects.safe_file(base, name)
+    except FileNotFoundError:
+        raise HTTPException(404) from None
 
 
 def _api_project(project: Project) -> Project:
@@ -294,80 +288,33 @@ class SaveIn(BaseModel):
 
 @app.get("/api/projects")
 def projects_list():
-    items = []
-    for p in sorted(PROJECTS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
-        try:
-            title = " ".join(t["text"] for t in json.loads(p.read_text()).get("title", []))
-        except (OSError, json.JSONDecodeError, TypeError, KeyError):
-            title = ""
-        items.append({
-            "name": p.stem, "title": title,
-            "modified": datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds"),
-        })
-    return items
+    return projects.list_projects()
 
 
 @app.get("/api/projects/{name}")
 def projects_get(name: str):
-    p = _safe_file(PROJECTS_DIR, f"{name}.json")
-    return Project.model_validate_json(p.read_text()).model_dump(mode="json")
+    try:
+        return projects.load_project(name).model_dump(mode="json")
+    except FileNotFoundError:
+        raise HTTPException(404) from None
 
 
 class ImportIn(BaseModel):
     text: str
 
 
-def _extract_json(text: str) -> str:
-    """Accept raw JSON, or JSON inside a ```json code block / surrounded by chat text."""
-    t = text.strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)```", t, re.S)
-    if fence:
-        t = fence.group(1).strip()
-    if not t.startswith("{") and "{" in t and "}" in t:
-        t = t[t.index("{"): t.rindex("}") + 1]
-    return t
-
-
 @app.post("/api/projects/import")
 def projects_import(body: ImportIn):
     """Check pasted project JSON (e.g. from the clip-picker skill) and return it normalized."""
-    if not body.text.strip():
-        raise HTTPException(422, "Paste the project JSON first.")
     try:
-        data = json.loads(_extract_json(body.text))
-    except json.JSONDecodeError as e:
-        raise HTTPException(422, f"That isn't valid JSON (line {e.lineno}, column {e.colno}): {e.msg}.")
-    if isinstance(data, dict) and isinstance(data.get("project"), dict):
-        data = data["project"]
-    if not isinstance(data, dict) or "clips" not in data:
-        raise HTTPException(422, "That JSON isn't a RankReel project (it needs \"title\" and \"clips\").")
-    try:
-        project = Project.model_validate(data)
-    except ValidationError as e:
-        problems = []
-        for err in e.errors()[:5]:
-            where = ".".join(str(x) for x in err["loc"])
-            if err["loc"][:1] == ("clips",) and len(err["loc"]) > 1 and isinstance(err["loc"][1], int):
-                where = f"clip {err['loc'][1] + 1}" + ("." + ".".join(map(str, err["loc"][2:])) if err["loc"][2:] else "")
-            problems.append(f"{where}: {err['msg']}")
-        raise HTTPException(422, "The project has problems:\n- " + "\n- ".join(problems))
-    for c in project.clips:  # never trust machine-local paths from pasted text
-        c.local_path = None
-    return project.model_dump(mode="json")
+        return projects.parse_project_text(body.text).model_dump(mode="json")
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
 
 
 @app.post("/api/projects")
 def projects_save(body: SaveIn):
-    base = slugify(body.name or body.project.name_text() or "project", 64)
-    name, k = base, 2
-    while body.unique and (PROJECTS_DIR / f"{name}.json").exists():
-        name, k = f"{base}_{k}", k + 1
-    path = PROJECTS_DIR / f"{name}.json"
-    project = body.project.model_copy(deep=True)
-    for c in project.clips:  # machine-local; the app re-fills it from its cache
-        c.local_path = None
-    path.write_text(project.model_dump_json(indent=2))
-    return {"name": name}
+    return {"name": projects.save_project(body.project, body.name, unique=body.unique)}
 
 
 def run() -> None:
