@@ -862,6 +862,20 @@ $("#newBtn").addEventListener("click", () => {
   changed();
 });
 
+/** Open `?project=<name>` (the link Claude's save_project tool hands out), then drop it from the URL
+ *  so a reload keeps whatever the user changed instead of re-opening the saved copy. */
+async function openLinkedProject() {
+  const params = new URLSearchParams(location.search);
+  const name = params.get("project");
+  if (!name) return;
+  params.delete("project");
+  const rest = params.toString();
+  history.replaceState(null, "", location.pathname + (rest ? `?${rest}` : "") + location.hash);
+  try {
+    loadProjectData(await (await api(`/api/projects/${encodeURIComponent(name)}`)).json());
+  } catch (e) { alert(`Couldn't open project "${name}": ${e.message}`); }
+}
+
 // ------------------------------------------------------------------ wiring
 function changed({ clips = true } = {}) {
   persist();
@@ -879,3 +893,4 @@ for (const c of state.clips) c.loading = false; // a reload mid-download leaves 
 changed();
 loadSfx();
 loadProjectList();
+openLinkedProject();

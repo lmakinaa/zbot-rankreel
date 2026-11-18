@@ -4,6 +4,7 @@ yt-dlp
 pillow
 pydantic
 fonttools
+mcp>=2.3,<3
 pytest
 httpx
 # Optional: ships ffmpeg/ffprobe binaries if you can't install ffmpeg system-wide.

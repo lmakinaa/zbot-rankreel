@@ -152,3 +152,31 @@ test("a removed clip ignores its pending download", async () => {
   await first;
   assert.equal(clip.meta, null);
 });
+
+test("a ?project= link opens that project once and leaves the rest of the URL", async () => {
+  const { run } = editor();
+  const calls = { api: [], loaded: [], url: null };
+  await run("openLinkedProject()", {
+    URLSearchParams,
+    location: { search: "?project=dog_fails_2&x=1", pathname: "/", hash: "" },
+    history: { replaceState: (_s, _t, url) => { calls.url = url; } },
+    api: async (path) => { calls.api.push(path); return { json: async () => ({ title: "T", clips: [] }) }; },
+    loadProjectData: (p) => calls.loaded.push(p),
+    alert: (m) => { throw new Error(m); },
+  });
+  assert.deepEqual(calls.api, ["/api/projects/dog_fails_2"]);
+  assert.equal(calls.loaded.length, 1);
+  assert.equal(calls.url, "/?x=1");
+});
+
+test("without ?project= the editor keeps the current work", async () => {
+  const { run } = editor();
+  let called = false;
+  await run("openLinkedProject()", {
+    URLSearchParams,
+    location: { search: "", pathname: "/", hash: "" },
+    history: { replaceState: () => { called = true; } },
+    api: async () => { called = true; },
+  });
+  assert.equal(called, false);
+});

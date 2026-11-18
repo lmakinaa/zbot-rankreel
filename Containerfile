@@ -1,4 +1,7 @@
-FROM registry.fedoraproject.org/fedora:44 AS app
+# Fedora's own registry by default. Docker Hub hosts the same official image if that one is slow:
+#   --build-arg BASE_IMAGE=docker.io/library/fedora:44
+ARG BASE_IMAGE=registry.fedoraproject.org/fedora:44
+FROM ${BASE_IMAGE} AS app
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

@@ -1,3 +1,4 @@
+# Read by both Docker and Podman (Podman uses .dockerignore when there is no .containerignore).
 .git
 .claude
 **/.DS_Store
