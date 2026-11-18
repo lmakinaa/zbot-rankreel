@@ -4,6 +4,23 @@
 
 The output is the "ranking" format popular with faceless Shorts channels: a big title with colored words, a 1–N rank list that fills in as each clip plays, the most eye-catching clip as the opening hook, and #1 saved for last. Each render is a ready-to-upload 1080×1920 MP4 plus a credits file for the description.
 
+## Why it matters — business impact
+
+Ranking Shorts are a proven format for faceless channels, but making one is slow, manual
+editing: find 5–7 source videos, scrub each for the 3–7 seconds worth keeping, decide the
+order, then build the title, rank list and transitions by hand. That labour limits how many
+videos a channel can publish, and on Shorts, publishing volume drives growth.
+
+| Before | With RankReel | Effect |
+|---|---|---|
+| A person scrubs every clip by eye to find the moment | Claude "watches" each video through frame contact sheets and an audio-loudness timeline, then cuts to 0.1s | The slowest step is automated |
+| Ordering clips is guesswork | Retention rules are encoded: hook first, best payoff last | Every video starts from a consistent, retention-aware structure |
+| Titles, rank list, transitions, credits all built by hand | Generated as a draft project, rendered to a 1080×1920 MP4 plus a credits file | Ready to upload, with attribution included |
+| An agent that can publish is a liability | The MCP server **cannot render, delete or publish**; a human approves every reel | Automation without losing editorial control |
+
+The operator's job shrinks from editing to reviewing, so one person can run more channels
+or post more often.
+
 ## The workflow
 
 1. **Analyze trends.** Claude studies what's performing in the niche (competitor channels, outlier videos, title patterns) using the companion competitor-to-reel-kit skill with VidIQ. It turns that into a video idea, titles and a clip-hunting guide.
